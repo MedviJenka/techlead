@@ -8,6 +8,8 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
+RUN groupadd --system app && useradd --system --gid app --no-create-home --shell /usr/sbin/nologin app
+
 WORKDIR /srv
 
 COPY pyproject.toml uv.lock ./
@@ -17,6 +19,9 @@ COPY settings.py alembic.ini ./
 COPY ai ./ai
 COPY app ./app
 COPY migrations ./migrations
+
+# Code and /opt/venv stay root-owned (world-readable); the app only needs to read them.
+USER app
 
 EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
