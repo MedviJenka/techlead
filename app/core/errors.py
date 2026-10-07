@@ -15,9 +15,11 @@ class DomainError(Exception):
     status_code: int = status.HTTP_400_BAD_REQUEST
     code: str = "domain_error"
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, details: Any = None) -> None:
         super().__init__(message)
         self.message = message
+        # JSON-serializable extra context for the client (e.g. the id of a conflicting row); omitted when None.
+        self.details = details
 
 
 class NotFoundError(DomainError):
@@ -30,6 +32,13 @@ class ConflictError(DomainError):
     code = "conflict"
 
 
+class UnprocessableError(DomainError):
+    """Input that passed schema validation but was rejected by a deeper rule (e.g. the database)."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "validation_error"
+
+
 def _error_response(status_code: int, code: str, message: str, details: Any = None) -> JSONResponse:
     """Every error leaves the API as ``{"error": {"code", "message", "details"?}}``."""
     error: dict[str, Any] = {"code": code, "message": message}
@@ -40,7 +49,7 @@ def _error_response(status_code: int, code: str, message: str, details: Any = No
 
 async def _domain_error_handler(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, DomainError)
-    return _error_response(exc.status_code, exc.code, exc.message)
+    return _error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 
 def _summarize(error: Any) -> str:
