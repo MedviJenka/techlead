@@ -1,0 +1,60 @@
+interpret_question_task:
+  description: >
+    A user at {business_name} asked:
+    """
+    {question}
+    """
+
+    Current time: {now}
+
+    Convert the question into a LeadSearchFilter. Map phrases conservatively, for example:
+    "strong" or "hot" leads → min_score 70 and/or priorities high/critical; "not contacted this week"
+    → not_contacted_for_days 7; "unknown budget" → budget_known false; "call today" → active
+    statuses sorted by score. Leave a filter empty when the question does not constrain it.
+    The application runs the search; you only produce the filter.
+  expected_output: >
+    A LeadSearchFilter with only the constraints implied by the question, a sort field and a limit
+    of at most 50.
+  agent: business_query_agent
+
+explain_results_task:
+  description: >
+    A user at {business_name} asked:
+    """
+    {question}
+    """
+
+    Current time: {now}
+
+    The application searched the leads with this filter:
+    {search_filter}
+
+    Matching leads (JSON):
+    {leads_json}
+
+    Answer the question directly using only these leads. Highlight the most relevant ones in
+    priority order with a concrete reason and suggested next action. Mention data gaps as caveats.
+    If no leads matched, say so plainly.
+  expected_output: >
+    A SalesAssistantAnswer with a direct answer, highlighted leads (only ids from the data above)
+    and caveats.
+  agent: sales_manager_agent
+
+review_pipeline_task:
+  description: >
+    Produce today's pipeline review for {business_name}.
+
+    Current time: {now}
+
+    Pipeline metrics (computed by the application):
+    {metrics_json}
+
+    Leads that need attention (JSON):
+    {leads_json}
+
+    Identify who must be contacted first, which deals are at risk and why, and the ordered list
+    of priorities for today. Reference only the leads above.
+  expected_output: >
+    A PipelineReview with a one-line headline, attention items (lead id, name, issue, recommended
+    action, urgency), risks and ordered priorities for today.
+  agent: sales_manager_agent
