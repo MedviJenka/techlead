@@ -1,4 +1,4 @@
-const API_BASE = '/api/v1'
+const API_BASE = `/api/${import.meta.env.VITE_API_VERSION ?? 'v1'}`
 
 export class ApiError extends Error {
   readonly status: number
@@ -11,18 +11,15 @@ export class ApiError extends Error {
   }
 }
 
+// Every backend error (domain, validation, HTTP, unhandled) uses this envelope; see app/core/errors.py.
 type ErrorBody = {
   error?: { code: string; message: string }
-  detail?: { msg: string; loc: (string | number)[] }[] | string
 }
 
 function describe(body: ErrorBody, status: number): ApiError {
   if (body.error) return new ApiError(status, body.error.code, body.error.message)
-  if (Array.isArray(body.detail)) {
-    const message = body.detail.map((d) => `${d.loc.at(-1)}: ${d.msg}`).join('; ')
-    return new ApiError(status, 'validation_error', message)
-  }
-  return new ApiError(status, 'http_error', typeof body.detail === 'string' ? body.detail : `HTTP ${status}`)
+  // Non-JSON responses (e.g. a proxy's HTML 502) never reach the API's error handlers.
+  return new ApiError(status, 'http_error', `HTTP ${status}`)
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {

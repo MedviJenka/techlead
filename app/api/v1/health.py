@@ -1,7 +1,9 @@
 import logging
+
 from fastapi import APIRouter, Response, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+
 from app.api.deps import SessionDep
 from app.schemas import HealthStatus
 

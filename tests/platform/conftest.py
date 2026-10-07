@@ -1,5 +1,9 @@
 """Fixtures for the application platform (FastAPI + PostgreSQL).
 
+DESTRUCTIVE: the session fixture runs `alembic downgrade base` (drops every table) and each test TRUNCATEs
+`businesses`. It therefore refuses (`pytest.exit`) any TEST_DATABASE_URL whose database name does not end in
+`_test` or whose host is Supabase (see `unsafe_test_database_reason`). Never point it at real data.
+
 Runs against a real PostgreSQL (`docker compose up -d db` provides `techlead_test` on :5433). The schema is
 built with the Alembic migrations, so these tests also verify that migrations match the models.
 Tests are skipped when the database is unreachable, keeping the AI-layer suite runnable anywhere.
@@ -7,7 +11,8 @@ Tests are skipped when the database is unreachable, keeping the AI-layer suite r
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -15,18 +20,38 @@ from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+# HACK: importing app.main builds the module-level ASGI app, whose create_app() loads Settings, and OPENAI_MODEL
+# is a required field. Without this, the platform suite would depend on a developer `.env` being present.
 os.environ.setdefault("OPENAI_MODEL", "test-model")
 
 from app.core.database import get_session
 from app.main import create_app
+from settings import get_config
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://techlead:techlead@localhost:5433/techlead_test"
 )
 ROOT = Path(__file__).resolve().parents[2]
+_SUPABASE_HOST_SUFFIXES = (".supabase.co", ".supabase.com")
+
+
+def unsafe_test_database_reason(url: str) -> str | None:
+    """Why `url` must not be used by the destructive fixtures, or None when it is a dedicated test database."""
+    try:
+        parsed = make_url(url)
+    except ArgumentError:
+        return f"TEST_DATABASE_URL is not a valid SQLAlchemy URL: {url!r}"
+    host = (parsed.host or "").lower()
+    if host.endswith(_SUPABASE_HOST_SUFFIXES) or "pooler" in host:
+        return f"TEST_DATABASE_URL points at Supabase host {host!r}; tests must use a local database"
+    if not (parsed.database or "").endswith("_test"):
+        return f"TEST_DATABASE_URL database {parsed.database!r} must end with '_test'"
+    return None
 
 
 async def _database_reachable() -> bool:
@@ -43,6 +68,8 @@ async def _database_reachable() -> bool:
 
 @pytest.fixture(scope="session")
 def migrated_database() -> Iterator[str]:
+    if reason := unsafe_test_database_reason(TEST_DATABASE_URL):
+        pytest.exit(f"Refusing to run destructive platform fixtures: {reason}", returncode=2)
     if not asyncio.run(_database_reachable()):
         pytest.skip(f"PostgreSQL not reachable at {TEST_DATABASE_URL} (run `docker compose up -d db`)")
     # No config file: alembic's fileConfig would reset logging for the rest of the session.
@@ -74,14 +101,26 @@ async def session(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterat
         yield session
 
 
-@pytest.fixture
-async def client(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncClient]:
+@asynccontextmanager
+async def make_client(session_factory: Callable[[], AsyncSession]) -> AsyncIterator[AsyncClient]:
+    """An HTTP client for a fresh app whose `get_session` dependency yields sessions from `session_factory`."""
     app = create_app()
 
     async def _session() -> AsyncIterator[AsyncSession]:
-        async with sessionmaker() as session:
+        async with session_factory() as session:
             yield session
 
     app.dependency_overrides[get_session] = _session
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+
+
+@pytest.fixture
+def api_prefix() -> str:
+    return get_config().api_prefix
+
+
+@pytest.fixture
+async def client(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncClient]:
+    async with make_client(sessionmaker) as client:
         yield client

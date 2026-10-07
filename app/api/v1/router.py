@@ -1,8 +1,11 @@
-from settings import Config
 from fastapi import APIRouter
+
 from app.api.v1 import businesses, health
 
 
-api_router = APIRouter(prefix=f"/api/{Config.API_VERSION}")
-api_router.include_router(health.router)
-api_router.include_router(businesses.router)
+def build_router(prefix: str) -> APIRouter:
+    """Mount the v1 endpoints under ``prefix`` (``Settings.api_prefix``); built per app, never at import time."""
+    router = APIRouter(prefix=prefix)
+    router.include_router(health.router)
+    router.include_router(businesses.router)
+    return router

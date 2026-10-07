@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.router import api_router
+from app.api.v1.router import build_router
 from app.core.database import get_engine
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
@@ -18,16 +18,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    config = get_config()
     configure_logging()
     app = FastAPI(title="Techlead", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=get_config().CORS_ORIGINS,
+        allow_origins=config.CORS_ORIGINS,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     register_exception_handlers(app)
-    app.include_router(api_router)
+    app.include_router(build_router(config.api_prefix))
     return app
 
 
