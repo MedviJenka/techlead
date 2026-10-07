@@ -1,0 +1,7 @@
+.*
+!.gitignore
+!.dockerignore
+!.env.example
+__pycache__/
+node_modules/
+dist/
