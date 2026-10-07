@@ -1,4 +1,3 @@
-import json
 import uuid
 from datetime import datetime
 from typing import Annotated, Any
@@ -7,14 +6,15 @@ from zoneinfo import available_timezones
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationInfo, field_validator
 
 from ai.schemas.business import AIConfiguration
+from app.schemas.common import MAX_JSON_FIELD_BYTES as MAX_JSON_FIELD_BYTES  # re-export (backward compat)
+from app.schemas.common import check_json_size
 
 SLUG_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 
 # Computed once: available_timezones() walks the tzdata tree on every call.
 KNOWN_TIMEZONES: frozenset[str] = frozenset(available_timezones())
 
-# Caps for free-form JSON on the public create endpoint (serialized UTF-8 bytes / list entries).
-MAX_JSON_FIELD_BYTES = 64 * 1024
+# Cap for list entries on the public create endpoint (the JSON byte cap is MAX_JSON_FIELD_BYTES, re-exported).
 MAX_CUSTOM_FIELD_DEFINITIONS = 100
 
 MAX_EXTRA_SKILLS = 10
@@ -65,10 +65,7 @@ class BusinessCreate(BaseModel):
     @field_validator("configuration", "custom_field_definitions")
     @classmethod
     def _bounded_json(cls, value: Any, info: ValidationInfo) -> Any:
-        size = len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode())
-        if size > MAX_JSON_FIELD_BYTES:
-            raise ValueError(f"{info.field_name} exceeds {MAX_JSON_FIELD_BYTES} bytes when serialized ({size})")
-        return value
+        return check_json_size(value, info.field_name or "value")
 
 
 class BusinessRead(BaseModel):
