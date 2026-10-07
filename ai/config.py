@@ -1,0 +1,18 @@
+from functools import cached_property
+from crewai import Task, LLM
+from dataclasses import dataclass
+from crewai.agents.agent_builder.base_agent import BaseAgent
+from settings import Config
+
+
+@dataclass(frozen=True)
+class AgentConfig:
+
+    agents: list[BaseAgent]
+    tasks: list[Task]
+    agents_config: dict = 'config/agents.yaml'
+    tasks_config: dict = 'config/tasks.yaml'
+
+    @cached_property
+    def llm(self) -> LLM:
+        return LLM(model=Config.OPENAI_MODEL)

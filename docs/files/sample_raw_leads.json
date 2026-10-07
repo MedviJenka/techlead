@@ -1,0 +1,393 @@
+{
+  "dataset": "sample_raw_leads",
+  "schema_version": "1.0",
+  "description": "Generic raw lead dataset designed for customizable AI lead-management integrations.",
+  "leads": [
+    {
+      "lead_id": "lead_001",
+      "source": "website_form",
+      "created_at": "2026-10-07T08:15:22Z",
+      "status": "new",
+      "priority": "high",
+      "contact": {
+        "first_name": "Daniel",
+        "last_name": "Cohen",
+        "email": "daniel.cohen@example.com",
+        "phone": "+972501234567",
+        "preferred_channel": "whatsapp"
+      },
+      "company": {
+        "name": "Cohen Properties",
+        "industry": "real_estate",
+        "size": "11-50"
+      },
+      "intent": {
+        "product_or_service": "premium apartment",
+        "budget": 2500000,
+        "currency": "ILS",
+        "timeframe": "1-3 months",
+        "notes": "Looking for a 4-room apartment in central Tel Aviv."
+      },
+      "engagement": {
+        "last_contact_at": null,
+        "contact_attempts": 0,
+        "replied": false
+      },
+      "ai": {
+        "lead_score": 92,
+        "sentiment": "positive",
+        "summary": "High-intent lead with clear budget and purchase timeframe.",
+        "recommended_action": "Contact within 1 hour"
+      },
+      "custom_fields": {
+        "city": "Tel Aviv",
+        "mortgage_approved": true
+      }
+    },
+    {
+      "lead_id": "lead_002",
+      "source": "facebook_ads",
+      "created_at": "2026-10-07T08:34:11Z",
+      "status": "contacted",
+      "priority": "medium",
+      "contact": {
+        "first_name": "Maya",
+        "last_name": "Levi",
+        "email": "maya.levi@example.com",
+        "phone": "+972521234568",
+        "preferred_channel": "phone"
+      },
+      "company": null,
+      "intent": {
+        "product_or_service": "consultation",
+        "budget": null,
+        "currency": "ILS",
+        "timeframe": "unknown",
+        "notes": "Requested more information about pricing."
+      },
+      "engagement": {
+        "last_contact_at": "2026-10-07T09:05:00Z",
+        "contact_attempts": 1,
+        "replied": true
+      },
+      "ai": {
+        "lead_score": 67,
+        "sentiment": "neutral",
+        "summary": "Interested but budget and purchase timeframe are still unknown.",
+        "recommended_action": "Qualify budget and urgency"
+      },
+      "custom_fields": {}
+    },
+    {
+      "lead_id": "lead_003",
+      "source": "whatsapp",
+      "created_at": "2026-10-07T09:02:41Z",
+      "status": "qualified",
+      "priority": "high",
+      "contact": {
+        "first_name": "Noam",
+        "last_name": "Bar",
+        "email": "noam.bar@example.com",
+        "phone": "+972541234569",
+        "preferred_channel": "whatsapp"
+      },
+      "company": {
+        "name": "Bar Solar Solutions",
+        "industry": "energy",
+        "size": "51-200"
+      },
+      "intent": {
+        "product_or_service": "automation platform",
+        "budget": 120000,
+        "currency": "ILS",
+        "timeframe": "this quarter",
+        "notes": "Needs automated handling of inbound installation leads."
+      },
+      "engagement": {
+        "last_contact_at": "2026-10-07T09:30:00Z",
+        "contact_attempts": 2,
+        "replied": true
+      },
+      "ai": {
+        "lead_score": 95,
+        "sentiment": "positive",
+        "summary": "Strong B2B opportunity with defined budget and immediate operational pain.",
+        "recommended_action": "Schedule demo"
+      },
+      "custom_fields": {
+        "monthly_lead_volume": 850,
+        "current_crm": "HubSpot"
+      }
+    },
+    {
+      "lead_id": "lead_004",
+      "source": "google_ads",
+      "created_at": "2026-10-07T09:40:18Z",
+      "status": "nurturing",
+      "priority": "low",
+      "contact": {
+        "first_name": "Sarah",
+        "last_name": "Green",
+        "email": "sarah.green@example.com",
+        "phone": "+972551234570",
+        "preferred_channel": "email"
+      },
+      "company": null,
+      "intent": {
+        "product_or_service": "service inquiry",
+        "budget": null,
+        "currency": "ILS",
+        "timeframe": "6+ months",
+        "notes": "Researching options, no immediate purchase intent."
+      },
+      "engagement": {
+        "last_contact_at": "2026-10-07T10:05:00Z",
+        "contact_attempts": 1,
+        "replied": false
+      },
+      "ai": {
+        "lead_score": 31,
+        "sentiment": "neutral",
+        "summary": "Early-stage research lead with low urgency.",
+        "recommended_action": "Add to long-term nurture"
+      },
+      "custom_fields": {}
+    },
+    {
+      "lead_id": "lead_005",
+      "source": "referral",
+      "created_at": "2026-10-07T10:12:36Z",
+      "status": "proposal_sent",
+      "priority": "high",
+      "contact": {
+        "first_name": "Avi",
+        "last_name": "Shalev",
+        "email": "avi.shalev@example.com",
+        "phone": "+972581234571",
+        "preferred_channel": "phone"
+      },
+      "company": {
+        "name": "Shalev Motors",
+        "industry": "automotive",
+        "size": "11-50"
+      },
+      "intent": {
+        "product_or_service": "AI lead management integration",
+        "budget": 60000,
+        "currency": "ILS",
+        "timeframe": "30 days",
+        "notes": "Wants AI to prioritize leads from website, WhatsApp, and Meta ads."
+      },
+      "engagement": {
+        "last_contact_at": "2026-10-07T11:20:00Z",
+        "contact_attempts": 3,
+        "replied": true
+      },
+      "ai": {
+        "lead_score": 89,
+        "sentiment": "positive",
+        "summary": "Qualified business lead with proposal already sent.",
+        "recommended_action": "Follow up on proposal tomorrow"
+      },
+      "custom_fields": {
+        "monthly_lead_volume": 420,
+        "dealership_locations": 2
+      }
+    },
+    {
+      "lead_id": "lead_006",
+      "source": "email",
+      "created_at": "2026-10-07T10:48:10Z",
+      "status": "new",
+      "priority": "medium",
+      "contact": {
+        "first_name": "Lior",
+        "last_name": "Ben-David",
+        "email": "lior.bd@example.com",
+        "phone": "+972591234572",
+        "preferred_channel": "email"
+      },
+      "company": {
+        "name": "Ben-David Legal",
+        "industry": "legal",
+        "size": "1-10"
+      },
+      "intent": {
+        "product_or_service": "client intake automation",
+        "budget": null,
+        "currency": "ILS",
+        "timeframe": "1-2 months",
+        "notes": "Interested in automating qualification of inbound legal inquiries."
+      },
+      "engagement": {
+        "last_contact_at": null,
+        "contact_attempts": 0,
+        "replied": false
+      },
+      "ai": {
+        "lead_score": 74,
+        "sentiment": "positive",
+        "summary": "Good fit, but budget is unknown.",
+        "recommended_action": "Send qualification questionnaire"
+      },
+      "custom_fields": {
+        "practice_area": "commercial_law"
+      }
+    },
+    {
+      "lead_id": "lead_007",
+      "source": "instagram",
+      "created_at": "2026-10-07T11:04:22Z",
+      "status": "unresponsive",
+      "priority": "low",
+      "contact": {
+        "first_name": "Eden",
+        "last_name": "Mor",
+        "email": "eden.mor@example.com",
+        "phone": "+972501234573",
+        "preferred_channel": "whatsapp"
+      },
+      "company": null,
+      "intent": {
+        "product_or_service": "pricing inquiry",
+        "budget": null,
+        "currency": "ILS",
+        "timeframe": "unknown",
+        "notes": "Asked for price and stopped responding."
+      },
+      "engagement": {
+        "last_contact_at": "2026-10-07T11:30:00Z",
+        "contact_attempts": 4,
+        "replied": false
+      },
+      "ai": {
+        "lead_score": 24,
+        "sentiment": "neutral",
+        "summary": "Low engagement after repeated follow-up attempts.",
+        "recommended_action": "Pause outreach for 14 days"
+      },
+      "custom_fields": {}
+    },
+    {
+      "lead_id": "lead_008",
+      "source": "phone_call",
+      "created_at": "2026-10-07T11:18:51Z",
+      "status": "qualified",
+      "priority": "high",
+      "contact": {
+        "first_name": "Tomer",
+        "last_name": "Katz",
+        "email": "tomer.katz@example.com",
+        "phone": "+972521234574",
+        "preferred_channel": "phone"
+      },
+      "company": {
+        "name": "Katz Insurance",
+        "industry": "insurance",
+        "size": "11-50"
+      },
+      "intent": {
+        "product_or_service": "AI lead routing",
+        "budget": 90000,
+        "currency": "ILS",
+        "timeframe": "immediate",
+        "notes": "Needs leads automatically routed by insurance type and agent availability."
+      },
+      "engagement": {
+        "last_contact_at": "2026-10-07T11:25:00Z",
+        "contact_attempts": 1,
+        "replied": true
+      },
+      "ai": {
+        "lead_score": 97,
+        "sentiment": "positive",
+        "summary": "Very strong opportunity with urgent need and defined budget.",
+        "recommended_action": "Book technical discovery call"
+      },
+      "custom_fields": {
+        "monthly_lead_volume": 1200,
+        "number_of_agents": 18
+      }
+    },
+    {
+      "lead_id": "lead_009",
+      "source": "linkedin",
+      "created_at": "2026-10-07T11:42:05Z",
+      "status": "contacted",
+      "priority": "medium",
+      "contact": {
+        "first_name": "Rachel",
+        "last_name": "Amir",
+        "email": "rachel.amir@example.com",
+        "phone": "+972541234575",
+        "preferred_channel": "email"
+      },
+      "company": {
+        "name": "Amir Recruitment",
+        "industry": "recruitment",
+        "size": "11-50"
+      },
+      "intent": {
+        "product_or_service": "candidate lead management",
+        "budget": 45000,
+        "currency": "ILS",
+        "timeframe": "this quarter",
+        "notes": "Wants AI to classify and prioritize incoming candidates and employer leads."
+      },
+      "engagement": {
+        "last_contact_at": "2026-10-07T12:05:00Z",
+        "contact_attempts": 1,
+        "replied": true
+      },
+      "ai": {
+        "lead_score": 82,
+        "sentiment": "positive",
+        "summary": "Relevant B2B use case with budget and near-term buying intent.",
+        "recommended_action": "Send tailored workflow example"
+      },
+      "custom_fields": {
+        "current_system": "Monday.com"
+      }
+    },
+    {
+      "lead_id": "lead_010",
+      "source": "website_chat",
+      "created_at": "2026-10-07T12:10:44Z",
+      "status": "new",
+      "priority": "medium",
+      "contact": {
+        "first_name": "Omer",
+        "last_name": "Tal",
+        "email": "omer.tal@example.com",
+        "phone": "+972551234576",
+        "preferred_channel": "whatsapp"
+      },
+      "company": {
+        "name": "Tal Dental",
+        "industry": "healthcare",
+        "size": "11-50"
+      },
+      "intent": {
+        "product_or_service": "patient lead automation",
+        "budget": null,
+        "currency": "ILS",
+        "timeframe": "1-3 months",
+        "notes": "Interested in automated follow-up for new patient inquiries."
+      },
+      "engagement": {
+        "last_contact_at": null,
+        "contact_attempts": 0,
+        "replied": false
+      },
+      "ai": {
+        "lead_score": 70,
+        "sentiment": "positive",
+        "summary": "Clear use case but budget and decision process are unknown.",
+        "recommended_action": "Contact and qualify"
+      },
+      "custom_fields": {
+        "clinic_locations": 3
+      }
+    }
+  ]
+}
