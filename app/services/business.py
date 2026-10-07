@@ -16,6 +16,14 @@ def _slug_taken(slug: str) -> ConflictError:
     return ConflictError(f"Business slug '{slug}' is already taken")
 
 
+async def require_business(repository: BusinessRepository, business_id: uuid.UUID) -> Business:
+    """The business, or ``NotFoundError``. Every tenant-scoped service checks this first (unknown tenant -> 404)."""
+    business = await repository.get(business_id)
+    if business is None:
+        raise NotFoundError(f"Business {business_id} not found")
+    return business
+
+
 def _to_model(data: BusinessCreate) -> Business:
     """Explicit field mapping: only these columns are client-settable (no mass assignment)."""
     return Business(
@@ -47,7 +55,4 @@ class BusinessService:
         return business
 
     async def get(self, business_id: uuid.UUID) -> Business:
-        business = await self._repository.get(business_id)
-        if business is None:
-            raise NotFoundError(f"Business {business_id} not found")
-        return business
+        return await require_business(self._repository, business_id)
