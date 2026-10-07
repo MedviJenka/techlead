@@ -11,9 +11,10 @@ Tests are skipped when the database is unreachable, keeping the AI-layer suite r
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
@@ -102,8 +103,14 @@ async def session(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterat
 
 
 @asynccontextmanager
-async def make_client(session_factory: Callable[[], AsyncSession]) -> AsyncIterator[AsyncClient]:
-    """An HTTP client for a fresh app whose `get_session` dependency yields sessions from `session_factory`."""
+async def make_client(
+    session_factory: Callable[[], AsyncSession],
+    overrides: Mapping[Callable[..., Any], Callable[..., Any]] | None = None,
+) -> AsyncIterator[AsyncClient]:
+    """An HTTP client for a fresh app whose `get_session` dependency yields sessions from `session_factory`.
+
+    `overrides` are extra FastAPI dependency overrides (e.g. a fixed clock), applied after the session one.
+    """
     app = create_app()
 
     async def _session() -> AsyncIterator[AsyncSession]:
@@ -111,6 +118,7 @@ async def make_client(session_factory: Callable[[], AsyncSession]) -> AsyncItera
             yield session
 
     app.dependency_overrides[get_session] = _session
+    app.dependency_overrides.update(overrides or {})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
 

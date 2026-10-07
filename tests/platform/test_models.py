@@ -6,26 +6,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai.schemas import ActivityType, Channel, Priority
-from app.models import Activity, Business, Lead
-
-
-async def _business(session: AsyncSession, slug: str) -> Business:
-    business = Business(name=slug.title(), slug=slug)
-    session.add(business)
-    await session.flush()
-    return business
-
-
-async def _lead(session: AsyncSession, business: Business, **fields: object) -> Lead:
-    lead = Lead(business_id=business.id, source="website", **fields)
-    session.add(lead)
-    await session.flush()
-    return lead
+from app.models import Activity, Lead
+from tests.platform.factories import make_business, make_lead
 
 
 async def test_lead_defaults_and_jsonb_roundtrip(session: AsyncSession) -> None:
-    business = await _business(session, "acme")
-    lead = await _lead(session, business, priority=Priority.HIGH, custom_fields={"rooms": 4, "location": "Tel Aviv"})
+    business = await make_business(session, "acme")
+    custom_fields = {"rooms": 4, "location": "Tel Aviv"}
+    lead = await make_lead(session, business, priority=Priority.HIGH, custom_fields=custom_fields)
     await session.commit()
     session.expunge_all()
 
@@ -38,14 +26,14 @@ async def test_lead_defaults_and_jsonb_roundtrip(session: AsyncSession) -> None:
 
 
 async def test_lead_score_must_be_0_to_100(session: AsyncSession) -> None:
-    business = await _business(session, "acme")
+    business = await make_business(session, "acme")
 
     with pytest.raises(IntegrityError, match="ck_leads_lead_score_range"):
-        await _lead(session, business, lead_score=101)
+        await make_lead(session, business, lead_score=101)
 
 
 async def test_enum_columns_reject_unknown_values(session: AsyncSession) -> None:
-    business = await _business(session, "acme")
+    business = await make_business(session, "acme")
 
     with pytest.raises(IntegrityError, match="ck_leads_lead_priority"):
         await session.execute(
@@ -55,19 +43,19 @@ async def test_enum_columns_reject_unknown_values(session: AsyncSession) -> None
 
 
 async def test_external_id_is_unique_per_business_and_source(session: AsyncSession) -> None:
-    acme, other = await _business(session, "acme"), await _business(session, "other")
-    await _lead(session, acme, external_id="ext-1")
-    await _lead(session, other, external_id="ext-1")  # another tenant may reuse the id
-    await _lead(session, acme, external_id=None)
-    await _lead(session, acme, external_id=None)  # many leads without an external id are fine
+    acme, other = await make_business(session, "acme"), await make_business(session, "other")
+    await make_lead(session, acme, external_id="ext-1")
+    await make_lead(session, other, external_id="ext-1")  # another tenant may reuse the id
+    await make_lead(session, acme, external_id=None)
+    await make_lead(session, acme, external_id=None)  # many leads without an external id are fine
 
     with pytest.raises(IntegrityError, match="uq_leads_business_id_source_external_id"):
-        await _lead(session, acme, external_id="ext-1")
+        await make_lead(session, acme, external_id="ext-1")
 
 
 async def test_activity_cannot_reference_another_tenants_lead(session: AsyncSession) -> None:
-    acme, other = await _business(session, "acme"), await _business(session, "other")
-    foreign_lead = await _lead(session, other)
+    acme, other = await make_business(session, "acme"), await make_business(session, "other")
+    foreign_lead = await make_lead(session, other)
 
     session.add(
         Activity(
@@ -90,8 +78,8 @@ async def test_tables_have_row_level_security_enabled(session: AsyncSession) -> 
 
 
 async def test_deleting_business_cascades_to_leads_and_activities(session: AsyncSession) -> None:
-    business = await _business(session, "acme")
-    lead = await _lead(session, business)
+    business = await make_business(session, "acme")
+    lead = await make_lead(session, business)
     session.add(
         Activity(
             business_id=business.id,
