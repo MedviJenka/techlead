@@ -1,6 +1,6 @@
 import json
 from functools import cache
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 from pydantic import BeforeValidator, Field
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -20,22 +20,20 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
-    APP_ENV:                     str        = Field(default='dev',  description='')
-    API_VERSION:                 str        = Field(default='v1',   description='version segment of the API prefix (/api/{API_VERSION})')
-    GOOGLE_SHEETS:               str | None = Field(default=None,   description='')
-    OPENAI_MODEL:                str        = Field(...,            description='')
-    AI_REASONING_MODEL:          str | None = Field(default=None,   description='model for qualification/strategy agents; falls back to OPENAI_MODEL')
-    AI_FAST_MODEL:               str | None = Field(default=None,   description='model for extraction/classification agents; falls back to OPENAI_MODEL')
-    OPENAI_API_KEY:              str | None = Field(default=None,   description='')
-    LOGFIRE_TOKEN:               str | None = Field(default=None,   description='')
-    SUPABASE_PROJECT_URL:        str | None = Field(default=None,   description='Supabase REST URL (https://...); not a database URL')
-    SUPABASE_PUBLISHABLE_KEY:    str | None = Field(default=None,   description='')
-    SUPABASE_SQL_CONNECT_STRING: str | None = Field(default=None,   description="the application's PostgreSQL connection string (Supabase)")
-    DB_TRANSACTION_POOLER:       bool       = Field(default=False,  description="set when SUPABASE_SQL_CONNECT_STRING points at Supabase's transaction-mode pooler (port 6543)")
-    DB_ECHO:                     bool       = Field(default=False,  description='log every SQL statement')
-    CORS_ORIGINS:                Annotated[list[str], NoDecode, BeforeValidator(_parse_origins)] = Field(
-        default=['http://localhost:5173'], description='frontend origins allowed by CORS (JSON list or comma-separated)'
-    )
+    APP_ENV:                     str           = Field(default='dev',  description='')
+    API_VERSION:                 str           = Field(default='v1',   description='version segment of the API prefix (/api/{API_VERSION})')
+    GOOGLE_SHEETS:               Optional[str] = Field(default=None,   description='')
+    OPENAI_MODEL:                str           = Field(...,            description='')
+    AI_REASONING_MODEL:          Optional[str] = Field(default=None,   description='model for qualification/strategy agents; falls back to OPENAI_MODEL')
+    AI_FAST_MODEL:               Optional[str] = Field(default=None,   description='model for extraction/classification agents; falls back to OPENAI_MODEL')
+    OPENAI_API_KEY:              Optional[str] = Field(default=None,   description='')
+    LOGFIRE_TOKEN:               Optional[str] = Field(default=None,   description='')
+    SUPABASE_PROJECT_URL:        Optional[str] = Field(default=None,   description='Supabase REST URL (https://...); not a database URL')
+    SUPABASE_PUBLISHABLE_KEY:    Optional[str] = Field(default=None,   description='')
+    SUPABASE_SQL_CONNECT_STRING: Optional[str] = Field(default=None,   description="the application's PostgreSQL connection string (Supabase)")
+    DB_TRANSACTION_POOLER:       bool          = Field(default=False,  description="set when SUPABASE_SQL_CONNECT_STRING points at Supabase's transaction-mode pooler (port 6543)")
+    DB_ECHO:                     bool          = Field(default=False,  description='log every SQL statement')
+    CORS_ORIGINS:                Annotated[list[str], NoDecode, BeforeValidator(_parse_origins)] = Field(default=['http://localhost:5173'], description='frontend origins allowed by CORS (JSON list or comma-separated)')
 
     @property
     def api_prefix(self) -> str:

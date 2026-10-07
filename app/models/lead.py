@@ -1,10 +1,8 @@
 import uuid
 from datetime import datetime
 from typing import Any
-
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
-
 from ai.schemas.enums import Priority, Sentiment
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
 

@@ -1,10 +1,8 @@
 import asyncio
 import logging
 from logging.config import fileConfig
-
 from alembic import context
 from sqlalchemy.engine import Connection, make_url
-
 from app.core.database import build_engine
 from app.models import Base
 from settings import get_config

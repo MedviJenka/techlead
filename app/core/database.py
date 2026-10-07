@@ -2,10 +2,8 @@ from collections.abc import AsyncIterator
 from functools import cache
 from typing import Any
 from uuid import uuid4
-
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-
 from settings import get_config
 
 
@@ -38,11 +36,11 @@ def get_engine() -> AsyncEngine:
 
 
 @cache
-def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
+def get_session_maker() -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(get_engine(), expire_on_commit=False)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency: one session per request. Services own commit boundaries."""
-    async with get_sessionmaker()() as session:
+    async with get_session_maker()() as session:
         yield session

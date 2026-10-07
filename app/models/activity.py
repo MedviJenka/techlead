@@ -1,10 +1,8 @@
 import uuid
 from datetime import datetime
 from typing import Any
-
 from sqlalchemy import ForeignKey, ForeignKeyConstraint, Index, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
-
 from ai.schemas.enums import ActivityType, Channel
 from app.models.base import Base, UUIDPrimaryKeyMixin, str_enum
 
