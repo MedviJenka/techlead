@@ -32,6 +32,10 @@ class UUIDPrimaryKeyMixin:
 
 
 class TimestampMixin:
+    # Fetch server-generated values with RETURNING on UPDATE too (INSERT already does by default). Otherwise
+    # `updated_at` is expired after an UPDATE flush and reading it lazy-loads, which fails on AsyncSession.
+    __mapper_args__: ClassVar[dict[str, Any]] = {"eager_defaults": True}
+
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 

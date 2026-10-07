@@ -1,6 +1,8 @@
 import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models import Business
 
 
@@ -18,6 +20,6 @@ class BusinessRepository:
 
     async def add(self, business: Business) -> Business:
         self._session.add(business)
+        # INSERT ... RETURNING already loads the server defaults (id, created_at, updated_at); no refresh needed.
         await self._session.flush()
-        await self._session.refresh(business)
         return business

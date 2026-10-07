@@ -18,6 +18,8 @@ depends_on: str | Sequence[str] | None = ${repr(depends_on)}
 
 
 def upgrade() -> None:
+    # Every new table must be locked down for Supabase: ENABLE ROW LEVEL SECURITY and revoke anon/authenticated
+    # grants (pattern: 20261007_41144746c167_lock_down_supabase_data_api.py, see README "New migration").
     ${upgrades if upgrades else "pass"}
 
 

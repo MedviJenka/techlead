@@ -1,24 +1,40 @@
 from collections.abc import AsyncIterator
 from functools import cache
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from settings import get_config
 
 
-def build_engine(url: str, echo: bool = False) -> AsyncEngine:
-    connect_args: dict[str, Any] = {}
-    if "pooler.supabase.com" in url:
-        # Supabase's PgBouncer (transaction mode) cannot keep prepared statements across transactions.
-        connect_args["statement_cache_size"] = 0
-    return create_async_engine(url, echo=echo, pool_pre_ping=True, connect_args=connect_args)
+def _unique_statement_name() -> str:
+    return f"__asyncpg_{uuid4()}__"
+
+
+def build_engine(url: str, echo: bool = False, *, transaction_pooler: bool = False) -> AsyncEngine:
+    """Create the async engine.
+
+    `transaction_pooler` must be set when `url` points at a transaction-mode pooler (Supabase Supavisor or
+    PgBouncer on port 6543). Such a pooler hands each transaction to an arbitrary backend, so prepared
+    statements must not be cached or reused by name, and pooling again on our side only holds idle slots.
+    """
+    kwargs: dict[str, Any] = {"echo": echo, "pool_pre_ping": True}
+    if transaction_pooler:
+        kwargs["connect_args"] = {
+            "statement_cache_size": 0,  # asyncpg's own statement cache
+            "prepared_statement_cache_size": 0,  # SQLAlchemy asyncpg dialect's cache
+            "prepared_statement_name_func": _unique_statement_name,  # no name collisions across backends
+        }
+        kwargs["poolclass"] = NullPool
+    return create_async_engine(url, **kwargs)
 
 
 @cache
 def get_engine() -> AsyncEngine:
     config = get_config()
-    return build_engine(config.async_database_url, echo=config.DB_ECHO)
+    return build_engine(config.async_database_url, echo=config.DB_ECHO, transaction_pooler=config.DB_TRANSACTION_POOLER)
 
 
 @cache
