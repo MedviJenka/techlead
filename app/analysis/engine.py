@@ -7,6 +7,7 @@ import asyncio
 import time
 from functools import cache
 from typing import TYPE_CHECKING, Protocol
+
 from ai.schemas import ActivitySnapshot, BusinessProfile, LeadSnapshot
 from app.core.logging import Logger
 
@@ -20,7 +21,9 @@ logger = Logger(__name__)
 
 class AnalysisEngine(Protocol):
 
-    async def analyze(self, business: BusinessProfile, lead: LeadSnapshot, activities: list[ActivitySnapshot]) -> "LeadIntelligenceResult": ...
+    async def analyze(
+        self, business: BusinessProfile, lead: LeadSnapshot, activities: list[ActivitySnapshot]
+    ) -> "LeadIntelligenceResult": ...
 
 
 @cache
