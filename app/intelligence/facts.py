@@ -111,8 +111,20 @@ def lead_facts(lead: Lead, events: Iterable[Event], now: datetime) -> dict[str, 
     }
 
 
+def _score(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100 else None
+
+
 def upstream_ai_score(lead: Lead) -> int | None:
-    """AI score delivered by the lead's source (``raw_payload.ai.lead_score``), until our own AI scores leads."""
+    """AI score delivered by the lead's source (``raw_payload.ai.lead_score``)."""
     ai = lead.raw_payload.get("ai")
-    score = ai.get("lead_score") if isinstance(ai, dict) else None
-    return score if isinstance(score, int) and not isinstance(score, bool) and 0 <= score <= 100 else None
+    return _score(ai.get("lead_score")) if isinstance(ai, dict) else None
+
+
+def ai_score(lead: Lead, events: Iterable[Event]) -> int | None:
+    """The latest AI analysis's score (``ai_analysis`` activity), else the score the lead's source delivered."""
+    analyses = [event for event in events if event.activity_type is ActivityType.AI_ANALYSIS]
+    for event in sorted(analyses, key=lambda event: event.created_at, reverse=True):
+        if (score := _score(event.metadata.get("ai_score"))) is not None:
+            return score
+    return upstream_ai_score(lead)

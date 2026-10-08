@@ -44,6 +44,20 @@ class UnprocessableError(DomainError):
     code = "validation_error"
 
 
+class BadGatewayError(DomainError):
+    """A dependency (e.g. the LLM provider) failed or answered with something unusable."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "bad_gateway"
+
+
+class ServiceUnavailableError(DomainError):
+    """A feature that needs configuration this deployment does not have (e.g. no LLM API key)."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_unavailable"
+
+
 def _error_response(status_code: int, code: str, message: str, details: Any = None) -> JSONResponse:
     """Every error leaves the API as ``{"error": {"code", "message", "details"?}}``."""
     error: dict[str, Any] = {"code": code, "message": message}

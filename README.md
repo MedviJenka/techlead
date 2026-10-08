@@ -164,3 +164,21 @@ history explains itself. Time-based rules (days since contact) move only on the 
 | PUT | `/businesses/{business_id}/settings` | Replace configuration and custom field definitions |
 | POST | `/businesses/{business_id}/leads/rescore` | Recompute every lead's score and priority |
 | GET | `/businesses/{business_id}/leads/{lead_id}/score` | Live score breakdown (matched rules, AI blend) |
+
+## AI analysis (CrewAI bridge)
+
+On a lead page, **Analyze with AI** runs the `LeadIntelligenceCrew` from `ai/` (qualification, AI scoring and
+next-action agents, with their skills and guardrails) on that lead: `POST /businesses/{business_id}/leads/{lead_id}/analyze`.
+
+- **Cost**: each analysis makes several real LLM calls with `OPENAI_MODEL` / `AI_REASONING_MODEL` and takes
+  seconds. Without `OPENAI_API_KEY` (for OpenAI models) the endpoint answers 503; other routes are unaffected.
+  Nothing runs automatically yet.
+- **Isolation**: the crew's tools read a snapshot of that one lead, its activities and its business
+  (`app/analysis/read_service.py`), loaded before the crew starts. An agent cannot reach another lead or tenant.
+- **What is saved**: the qualification summary (`ai_summary`), the recommended action (`recommended_action`) and an
+  `ai_analysis` activity holding the full result. Its AI score replaces the imported one in the score blend from
+  then on; the priority stays rule-based (the AI's own priority is returned as advice only).
+- **Failures**: a provider error or a result the guardrails reject answers 502 and changes nothing.
+
+Run it once by hand with `python -m ai.demo lead_008` (sample data, real LLM calls).
+

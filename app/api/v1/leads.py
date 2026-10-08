@@ -4,10 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import DashboardServiceDep, LeadServiceDep
+from app.api.deps import AnalysisEngineDep, DashboardServiceDep, LeadServiceDep
 from app.core.clock import utc_now as utc_now  # re-export: tests override this dependency
 from app.intelligence import ScoreBreakdown
 from app.schemas.activity import ActivityRead
+from app.schemas.analysis import LeadAnalysis
 from app.schemas.common import Page
 from app.schemas.dashboard import DashboardSummary
 from app.schemas.lead import LeadCreate, LeadListItem, LeadListParams, LeadRead, LeadUpdate, RescoreResult
@@ -55,6 +56,14 @@ async def update_lead(
 @router.get("/leads/{lead_id}/score", response_model=ScoreBreakdown)
 async def lead_score(business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadServiceDep) -> ScoreBreakdown:
     return await service.score(business_id, lead_id)
+
+
+@router.post("/leads/{lead_id}/analyze", response_model=LeadAnalysis)
+async def analyze_lead(
+    business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadServiceDep, engine: AnalysisEngineDep
+) -> LeadAnalysis:
+    """Run the AI crew on the lead (several LLM calls; takes seconds). Saves its summary, next action and score."""
+    return await service.analyze(business_id, lead_id, engine)
 
 
 @router.get("/leads/{lead_id}/activities", response_model=Page[ActivityRead])

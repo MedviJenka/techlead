@@ -5,6 +5,7 @@ import type {
   Dashboard,
   ImportResult,
   Lead,
+  LeadAnalysis,
   LeadDetail,
   Page,
   RescoreResult,
@@ -51,3 +52,5 @@ export const useImport = (id: string) =>
   useLeadMutation<ImportResult>(id, '/leads/import')
 export const useRescore = (id: string) =>
   useLeadMutation<RescoreResult>(id, '/leads/rescore')
+export const useAnalyze = (id: string, leadId: string) =>
+  useLeadMutation<LeadAnalysis>(id, `/leads/${leadId}/analyze`)
