@@ -1,123 +1,101 @@
-"""Fixtures for the application platform (FastAPI + PostgreSQL).
+"""Fixtures for the application platform (FastAPI + Supabase).
 
-DESTRUCTIVE: the session fixture runs `alembic downgrade base` (drops every table) and each test TRUNCATEs
-`businesses`. It therefore refuses (`pytest.exit`) any TEST_DATABASE_URL whose database name does not end in
-`_test` or whose host is Supabase (see `unsafe_test_database_reason`). Never point it at real data.
+DESTRUCTIVE: after every test the `db` fixture deletes every business (and, by cascade, all leads, activities and
+users). TEST_SUPABASE_URL / TEST_SUPABASE_SECRET_KEY (env or `.env`) must therefore be a separate Supabase project
+used only for tests, with `db/*.sql` pasted into its SQL editor. The fixture refuses the app's own project.
 
-Runs against a real PostgreSQL (`docker compose up -d db` provides `techlead_test` on :5433). The schema is
-built with the Alembic migrations, so these tests also verify that migrations match the models.
-Tests are skipped when the database is unreachable, keeping the AI-layer suite runnable anywhere.
+Database tests are skipped when the test project is not configured or not reachable, keeping the rest of the suite
+runnable anywhere.
 """
 
-import asyncio
 import os
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+import uuid
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
-from alembic import command
-from alembic.config import Config
+from fastapi import Header
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-from sqlalchemy.engine import make_url
-from sqlalchemy.exc import ArgumentError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
+from supabase import AsyncClient as SupabaseClient
+from supabase import acreate_client
 
 # HACK: importing app.main builds the module-level ASGI app, whose create_app() loads Settings, and OPENAI_MODEL
 # is a required field. Without this, the platform suite would depend on a developer `.env` being present.
 os.environ.setdefault("OPENAI_MODEL", "test-model")
 
-from app.core.database import get_session
+from app.core.auth import AuthUser, current_user
+from app.core.supabase import get_supabase
 from app.main import create_app
 from settings import get_config
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://techlead:techlead@localhost:5433/techlead_test"
-)
 ROOT = Path(__file__).resolve().parents[2]
-_SUPABASE_HOST_SUFFIXES = (".supabase.co", ".supabase.com")
+TEST_USER_ID = uuid.UUID(int=1)
 
 
-def unsafe_test_database_reason(url: str) -> str | None:
-    """Why `url` must not be used by the destructive fixtures, or None when it is a dedicated test database."""
-    try:
-        parsed = make_url(url)
-    except ArgumentError:
-        return f"TEST_DATABASE_URL is not a valid SQLAlchemy URL: {url!r}"
-    host = (parsed.host or "").lower()
-    if host.endswith(_SUPABASE_HOST_SUFFIXES) or "pooler" in host:
-        return f"TEST_DATABASE_URL points at Supabase host {host!r}; tests must use a local database"
-    if not (parsed.database or "").endswith("_test"):
-        return f"TEST_DATABASE_URL database {parsed.database!r} must end with '_test'"
+def as_user(user_id: uuid.UUID) -> dict[str, str]:
+    """Request headers that make the test app treat the caller as ``user_id`` instead of the default test user."""
+    return {"x-test-user": str(user_id)}
+
+
+def _test_user(x_test_user: Annotated[uuid.UUID | None, Header()] = None) -> AuthUser:
+    user_id = x_test_user or TEST_USER_ID
+    return AuthUser(id=user_id, email=f"{user_id}@example.com")
+
+
+def _normalized(url: str) -> str:
+    return url.strip().rstrip("/").lower()
+
+
+def unsafe_test_project_reason(test_url: str, app_url: str | None) -> str | None:
+    """Why `test_url` must not be used by the destructive fixtures, or None when it is a separate project."""
+    if not _normalized(test_url).startswith("https://"):
+        return "TEST_SUPABASE_URL must be a Supabase project URL (https://<ref>.supabase.co)"
+    if app_url and _normalized(test_url) == _normalized(app_url):
+        return "TEST_SUPABASE_URL is the app's own project (SUPABASE_PROJECT_URL); use a separate test project"
     return None
 
 
-async def _database_reachable() -> bool:
-    engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
-    finally:
-        await engine.dispose()
+async def _delete_all(db: SupabaseClient) -> None:
+    # PostgREST refuses an unfiltered DELETE; every real id differs from the nil UUID.
+    await db.table("businesses").delete().neq("id", str(uuid.UUID(int=0))).execute()
 
 
-@pytest.fixture(scope="session")
-def migrated_database() -> Iterator[str]:
-    if reason := unsafe_test_database_reason(TEST_DATABASE_URL):
+@pytest.fixture
+async def db() -> AsyncIterator[SupabaseClient]:
+    config = get_config()
+    if not config.TEST_SUPABASE_URL or not config.TEST_SUPABASE_SECRET_KEY:
+        pytest.skip("TEST_SUPABASE_URL / TEST_SUPABASE_SECRET_KEY not set (a separate Supabase project for tests)")
+    if reason := unsafe_test_project_reason(config.TEST_SUPABASE_URL, config.SUPABASE_PROJECT_URL):
         pytest.exit(f"Refusing to run destructive platform fixtures: {reason}", returncode=2)
-    if not asyncio.run(_database_reachable()):
-        pytest.skip(f"PostgreSQL not reachable at {TEST_DATABASE_URL} (run `docker compose up -d db`)")
-    # No config file: alembic's fileConfig would reset logging for the rest of the session.
-    config = Config()
-    config.set_main_option("script_location", str(ROOT / "migrations"))
-    config.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
-    command.downgrade(config, "base")
-    command.upgrade(config, "head")
-    yield TEST_DATABASE_URL
-
-
-@pytest.fixture
-async def engine(migrated_database: str) -> AsyncIterator[AsyncEngine]:
-    engine = create_async_engine(migrated_database, poolclass=NullPool)
-    yield engine
-    async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE businesses CASCADE"))
-    await engine.dispose()
-
-
-@pytest.fixture
-def sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, expire_on_commit=False)
-
-
-@pytest.fixture
-async def session(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncSession]:
-    async with sessionmaker() as session:
-        yield session
+    client = await acreate_client(config.TEST_SUPABASE_URL, config.TEST_SUPABASE_SECRET_KEY)
+    try:
+        await _delete_all(client)
+    except Exception as exc:
+        pytest.skip(f"Test Supabase project not usable ({exc}); did you paste db/*.sql into it?")
+    yield client
+    await _delete_all(client)
 
 
 @asynccontextmanager
 async def make_client(
-    session_factory: Callable[[], AsyncSession],
+    db: SupabaseClient,
     overrides: Mapping[Callable[..., Any], Callable[..., Any]] | None = None,
 ) -> AsyncIterator[AsyncClient]:
-    """An HTTP client for a fresh app whose `get_session` dependency yields sessions from `session_factory`.
+    """An HTTP client for a fresh app whose `get_supabase` dependency returns `db`.
 
-    `overrides` are extra FastAPI dependency overrides (e.g. a fixed clock), applied after the session one.
+    Requests are signed in as `TEST_USER_ID`; `as_user` headers switch to another user.
+
+    `overrides` are extra FastAPI dependency overrides (e.g. a fixed clock), applied after the default ones.
     """
     app = create_app()
 
-    async def _session() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
+    async def _db() -> SupabaseClient:
+        return db
 
-    app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[get_supabase] = _db
+    app.dependency_overrides[current_user] = _test_user
     app.dependency_overrides.update(overrides or {})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
@@ -129,6 +107,6 @@ def api_prefix() -> str:
 
 
 @pytest.fixture
-async def client(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncClient]:
-    async with make_client(sessionmaker) as client:
+async def client(db: SupabaseClient) -> AsyncIterator[AsyncClient]:
+    async with make_client(db) as client:
         yield client

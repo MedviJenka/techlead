@@ -10,3 +10,5 @@ frontend
 supabase
 tests
 docs
+db
+*.stackdump

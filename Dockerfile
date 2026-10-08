@@ -15,13 +15,12 @@ WORKDIR /srv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY settings.py alembic.ini ./
+COPY settings.py ./
 COPY ai ./ai
 COPY app ./app
-COPY migrations ./migrations
 
 # Code and /opt/venv stay root-owned (world-readable); the app only needs to read them.
 USER app
 
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

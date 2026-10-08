@@ -2,8 +2,7 @@ from typing import Any
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from supabase import AsyncClient
 
 from ai.schemas import AutonomyLevel
 from ai.schemas.business import DEFAULT_APPROVAL_REQUIRED
@@ -86,7 +85,7 @@ def test_custom_field_definitions_size_and_length_are_capped() -> None:
         _create(custom_field_definitions=[{"blob": "x" * MAX_JSON_FIELD_BYTES}])
 
 
-# --- service (real PostgreSQL) ---
+# --- service (test Supabase project) ---
 
 
 class _StaleSlugLookupRepository(BusinessRepository):
@@ -96,8 +95,8 @@ class _StaleSlugLookupRepository(BusinessRepository):
         return None
 
 
-async def test_create_persists_server_controlled_ai_policy(session: AsyncSession) -> None:
-    service = BusinessService(session, BusinessRepository(session))
+async def test_create_persists_server_controlled_ai_policy(db: AsyncClient) -> None:
+    service = BusinessService(BusinessRepository(db))
 
     business = await service.create(_create(ai_configuration={"instructions": "Be brief."}))
 
@@ -106,22 +105,21 @@ async def test_create_persists_server_controlled_ai_policy(session: AsyncSession
     assert business.ai_configuration["approval_required_actions"] == [a.value for a in DEFAULT_APPROVAL_REQUIRED]
 
 
-async def test_duplicate_slug_precheck_raises_conflict(session: AsyncSession) -> None:
-    service = BusinessService(session, BusinessRepository(session))
+async def test_duplicate_slug_precheck_raises_conflict(db: AsyncClient) -> None:
+    service = BusinessService(BusinessRepository(db))
     await service.create(_create())
 
     with pytest.raises(ConflictError, match="acme-solar"):
         await service.create(_create(name="Other"))
 
 
-async def test_integrity_error_race_is_translated_to_conflict(session: AsyncSession) -> None:
-    await BusinessService(session, BusinessRepository(session)).create(_create())
-    racing = BusinessService(session, _StaleSlugLookupRepository(session))
+async def test_unique_violation_race_is_translated_to_conflict(db: AsyncClient) -> None:
+    await BusinessService(BusinessRepository(db)).create(_create())
+    racing = BusinessService(_StaleSlugLookupRepository(db))
 
     with pytest.raises(ConflictError, match="acme-solar") as exc_info:
         await racing.create(_create(name="Other"))
 
     assert exc_info.value.__cause__ is not None
-    # The session was rolled back and stays usable; only the original row exists.
-    count = await session.scalar(select(func.count()).select_from(Business).where(Business.slug == "acme-solar"))
-    assert count == 1
+    rows = (await db.table("businesses").select("id").eq("slug", "acme-solar").execute()).data
+    assert len(rows) == 1

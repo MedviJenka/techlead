@@ -22,6 +22,11 @@ class DomainError(Exception):
         self.details = details
 
 
+class UnauthorizedError(DomainError):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    code = "unauthorized"
+
+
 class NotFoundError(DomainError):
     status_code = status.HTTP_404_NOT_FOUND
     code = "not_found"

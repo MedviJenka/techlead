@@ -44,7 +44,7 @@ Lead ingestion
         ↓
 Normalization
         ↓
-PostgreSQL
+Supabase
         ↓
 Deterministic business rules
         ↓
@@ -62,7 +62,7 @@ CRM / salesperson / WhatsApp / email
 Important architecture principle:
 
 ```text
-PostgreSQL = source of truth
+Supabase = source of truth
 
 Application services = authority
 
@@ -90,10 +90,7 @@ Never allow an LLM or CrewAI agent to become the source of truth.
 * Python 3.12+
 * FastAPI
 * Pydantic v2
-* SQLAlchemy 2
-* PostgreSQL
-* Alembic
-* asyncpg
+* Supabase Python client for every database call (no ORM, no migration tool)
 
 ## AI
 
@@ -126,7 +123,7 @@ Possible providers:
 
 * Docker
 * Docker Compose
-* PostgreSQL container
+* Supabase (managed PostgreSQL)
 * backend container
 * frontend container
 
@@ -159,7 +156,7 @@ backend/
 │   │   └── factory/
 │   └── main.py
 │
-├── migrations/
+├── db/                # the schema: SQL files to paste into the Supabase SQL editor
 ├── tests/
 ├── Dockerfile
 └── pyproject.toml
@@ -2178,7 +2175,19 @@ SELECT * FROM leads
 
 without tenant filtering at the application/repository level.
 
-Future roles:
+Authentication and membership (implemented):
+
+* Users sign in with Google through Supabase Auth in the browser. The frontend uses supabase-js with the
+  publishable key for sign-in only; all data goes through FastAPI.
+* FastAPI verifies the Supabase access token against the project's JWKS (`app/core/auth.py`). Every route except
+  `/health` requires it.
+* The `users` table (`id` = Supabase Auth user id) links each user to exactly one business, with a role.
+  Creating a business makes the caller its `owner`.
+* Every `/businesses/{business_id}/...` route checks that the caller belongs to that business and answers 404
+  otherwise, so other businesses' existence is not revealed. A client-supplied `business_id` is never trusted
+  on its own.
+
+Roles (stored; only `owner` is assigned so far, permissions per role are not enforced yet):
 
 ```text
 owner
@@ -2187,30 +2196,35 @@ sales
 admin
 ```
 
+Not built yet: inviting more users to a business.
+
 ---
 
 # 55. API
 
-Initial endpoints:
+Implemented endpoints (lead routes are nested under the business, so tenant scope is explicit in the URL):
 
 ```text
-POST   /api/v1/businesses
-GET    /api/v1/businesses/{id}
+GET    /api/v1/health                                   (public)
+GET    /api/v1/me                                       (signed-in user and their business)
 
-POST   /api/v1/leads
-GET    /api/v1/leads
-GET    /api/v1/leads/{id}
-PATCH  /api/v1/leads/{id}
+POST   /api/v1/businesses                               (caller becomes owner; one business per user)
+GET    /api/v1/businesses/{business_id}
 
-POST   /api/v1/leads/import
+POST   /api/v1/businesses/{business_id}/leads
+GET    /api/v1/businesses/{business_id}/leads
+GET    /api/v1/businesses/{business_id}/leads/{lead_id}
+PATCH  /api/v1/businesses/{business_id}/leads/{lead_id}
+POST   /api/v1/businesses/{business_id}/leads/import
+GET    /api/v1/businesses/{business_id}/leads/{lead_id}/activities
+GET    /api/v1/businesses/{business_id}/dashboard
+```
 
-POST   /api/v1/leads/{id}/analyze
+Planned:
 
-GET    /api/v1/leads/{id}/activities
-
-POST   /api/v1/ai/query
-
-GET    /api/v1/dashboard/summary
+```text
+POST   /api/v1/businesses/{business_id}/leads/{lead_id}/analyze
+POST   /api/v1/businesses/{business_id}/ai/query
 ```
 
 Internal AI endpoints should invoke application services, not agents directly.
@@ -2443,13 +2457,17 @@ FastAPI
 
 React
 
-PostgreSQL
+Supabase PostgreSQL
 
 Docker Compose
 
-SQLAlchemy
+Supabase client
 
-Alembic
+SQL schema files (db/)
+
+Sign in with Google (Supabase Auth) + token verification in FastAPI
+
+users table: one business per user, membership checked on every business route
 
 Business model
 
@@ -2459,6 +2477,8 @@ Activity model
 ```
 
 No AI yet.
+
+Status: done, except CI (GitHub Actions) and an automated test that the publishable key cannot read the tables.
 
 ---
 
@@ -2491,6 +2511,9 @@ Use:
 ```text
 sample_raw_leads.json
 ```
+
+Status: done. Lead and activity are saved as two requests (not one transaction); the dashboard is computed in
+Python (no SQL functions). Not built: webhook idempotency (`ingest_events`), E.164 phone normalization.
 
 ---
 
@@ -2976,7 +2999,7 @@ For every phase:
 6. run tests
 7. run type checking
 8. run linting
-9. verify migrations
+9. verify the db/ SQL files match app/models
 10. verify Docker
 11. only then continue
 

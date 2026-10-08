@@ -1,83 +1,120 @@
 import uuid
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import ColumnElement, Select, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import defer
+from postgrest import CountMethod
+from supabase import AsyncClient
 
+from app.core.supabase import to_json
 from app.models import Lead
-from app.schemas.lead import LeadListParams
+from app.schemas.lead import LeadListParams, LeadSummary
 
-# ILIKE wildcards and the escape character itself, matched literally in `q` searches.
-_LIKE_ESCAPE = "\\"
+# List views select only these columns: they never load (or leak) `raw_payload`.
+_SUMMARY_COLUMNS = ",".join(LeadSummary.model_fields)
+# PostgREST caps each response at this many rows (Supabase default).
+_MAX_ROWS = 1000
+_SEARCH_COLUMNS = ("first_name", "last_name", "email", "phone", "company_name")
 
 
-def _escape_like(value: str) -> str:
-    return value.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2).replace("%", r"\%").replace("_", r"\_")
-
-
-def _list_filters(business_id: uuid.UUID, params: LeadListParams) -> list[ColumnElement[bool]]:
-    filters: list[ColumnElement[bool]] = [Lead.business_id == business_id]
-    if params.status is not None:
-        filters.append(Lead.status == params.status)
-    if params.priority is not None:
-        filters.append(Lead.priority == params.priority)
-    if params.source is not None:
-        filters.append(Lead.source == params.source)
-    if params.q is not None:
-        pattern = f"%{_escape_like(params.q)}%"
-        columns = (Lead.first_name, Lead.last_name, Lead.email, Lead.phone, Lead.company_name)
-        filters.append(or_(*(column.ilike(pattern, escape=_LIKE_ESCAPE) for column in columns)))
-    return filters
+def _search_filter(q: str) -> str:
+    """PostgREST ``or`` filter: any search column contains ``q`` (case-insensitive, ``%`` and ``_`` literal)."""
+    like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    # Double-quoted so commas and parentheses in `q` cannot break the filter syntax.
+    quoted = '"' + f"*{like}*".replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return ",".join(f"{column}.ilike.{quoted}" for column in _SEARCH_COLUMNS)
 
 
 class LeadRepository:
-    """Tenant-scoped lead persistence. Every query filters ``business_id`` (never ``session.get`` by id alone)."""
+    """Tenant-scoped lead persistence. Every query filters ``business_id`` (never a lead id alone)."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+    def __init__(self, db: AsyncClient) -> None:
+        self._db = db
 
-    def _scoped(self, business_id: uuid.UUID) -> Select[Lead]:
-        return select(Lead).where(Lead.business_id == business_id)
+    async def _first(self, business_id: uuid.UUID, **equals: str) -> Lead | None:
+        """The oldest lead of the business matching every ``column=value`` in ``equals``."""
+        query = self._db.table("leads").select("*").eq("business_id", str(business_id))
+        for column, value in equals.items():
+            query = query.eq(column, value)
+        response = await query.order("created_at").order("id").limit(1).execute()
+        return Lead.model_validate(response.data[0]) if response.data else None
 
     async def get(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> Lead | None:
-        return await self._session.scalar(self._scoped(business_id).where(Lead.id == lead_id))
+        return await self._first(business_id, id=str(lead_id))
 
     async def get_by_external_id(self, business_id: uuid.UUID, source: str, external_id: str) -> Lead | None:
-        stmt = self._scoped(business_id).where(Lead.source == source, Lead.external_id == external_id)
-        return await self._session.scalar(stmt)
+        return await self._first(business_id, source=source, external_id=external_id)
 
     async def get_oldest_by_email(self, business_id: uuid.UUID, email: str) -> Lead | None:
-        return await self._oldest(business_id, Lead.email == email)
+        return await self._first(business_id, email=email)
 
     async def get_oldest_by_phone(self, business_id: uuid.UUID, phone: str) -> Lead | None:
-        return await self._oldest(business_id, Lead.phone == phone)
+        return await self._first(business_id, phone=phone)
 
-    async def _oldest(self, business_id: uuid.UUID, condition: ColumnElement[bool]) -> Lead | None:
-        stmt = self._scoped(business_id).where(condition).order_by(Lead.created_at, Lead.id).limit(1)
-        return await self._session.scalar(stmt)
+    async def save(
+        self,
+        business_id: uuid.UUID,
+        lead_id: uuid.UUID | None,
+        values: dict[str, Any],
+        activities: list[dict[str, Any]],
+    ) -> Lead:
+        """Insert (``lead_id=None``) or update a lead, then append ``activities`` to it.
 
-    async def add(self, lead: Lead) -> None:
-        self._session.add(lead)
-        # INSERT ... RETURNING loads id/created_at/updated_at/status defaults; no refresh needed.
-        await self._session.flush()
-
-    async def flush(self) -> None:
-        await self._session.flush()
-
-    async def list_page(self, business_id: uuid.UUID, params: LeadListParams) -> tuple[list[Lead], int]:
-        """One page ordered newest first (``created_at DESC, id DESC``) plus the total match count.
-
-        ``raw_payload`` is deferred with ``raiseload``: list views never load (or leak) the source payload.
+        Two requests, not one transaction: if the activity insert fails, the lead change is kept without its events.
         """
-        filters = _list_filters(business_id, params)
-        total = await self._session.scalar(select(func.count()).select_from(Lead).where(*filters))
-        stmt = (
-            select(Lead)
-            .where(*filters)
-            .options(defer(Lead.raw_payload, raiseload=True))
-            .order_by(Lead.created_at.desc(), Lead.id.desc())
-            .limit(params.limit)
-            .offset(params.offset)
+        leads = self._db.table("leads")
+        if lead_id is None:
+            query = leads.insert(to_json(values | {"business_id": business_id}))
+        else:
+            changes = to_json(values | {"updated_at": datetime.now(UTC)})
+            query = leads.update(changes).eq("business_id", str(business_id)).eq("id", str(lead_id))
+        response = await query.execute()
+        if not response.data:
+            raise LookupError(f"Lead {lead_id} not found")
+        lead = Lead.model_validate(response.data[0])
+        if activities:
+            # A bulk insert needs the same keys in every row.
+            rows = [
+                {"business_id": business_id, "lead_id": lead.id, "channel": None, "metadata": {}} | a
+                for a in activities
+            ]
+            await self._db.table("activities").insert(to_json(rows)).execute()
+        return lead
+
+    async def list_all(self, business_id: uuid.UUID) -> list[LeadSummary]:
+        """Every lead of the business, fetched in pages of PostgREST's default row limit."""
+        leads: list[LeadSummary] = []
+        while True:
+            response = (
+                await self._db.table("leads")
+                .select(_SUMMARY_COLUMNS)
+                .eq("business_id", str(business_id))
+                .order("id")
+                .range(len(leads), len(leads) + _MAX_ROWS - 1)
+                .execute()
+            )
+            leads += [LeadSummary.model_validate(row) for row in response.data]
+            if len(response.data) < _MAX_ROWS:
+                return leads
+
+    async def list_page(self, business_id: uuid.UUID, params: LeadListParams) -> tuple[list[LeadSummary], int]:
+        """One page ordered newest first (``created_at DESC, id DESC``) plus the total match count."""
+        query = (
+            self._db.table("leads")
+            .select(_SUMMARY_COLUMNS, count=CountMethod.exact)
+            .eq("business_id", str(business_id))
         )
-        leads = (await self._session.scalars(stmt)).all()
-        return list(leads), total or 0
+        if params.status is not None:
+            query = query.eq("status", params.status)
+        if params.priority is not None:
+            query = query.eq("priority", params.priority.value)
+        if params.source is not None:
+            query = query.eq("source", params.source)
+        if params.q is not None:
+            query = query.or_(_search_filter(params.q))
+        response = (
+            await query.order("created_at", desc=True)
+            .order("id", desc=True)
+            .range(params.offset, params.offset + params.limit - 1)
+            .execute()
+        )
+        return [LeadSummary.model_validate(row) for row in response.data], response.count or 0

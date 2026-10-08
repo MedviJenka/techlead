@@ -5,6 +5,7 @@ import pytest
 from httpx import AsyncClient
 
 from ai.schemas import AutonomyLevel
+from tests.platform.conftest import as_user
 
 
 def _payload(**overrides: Any) -> dict[str, Any]:
@@ -28,10 +29,30 @@ async def test_create_and_get_business(client: AsyncClient, api_prefix: str) -> 
 async def test_duplicate_slug_is_conflict(client: AsyncClient, api_prefix: str) -> None:
     await client.post(f"{api_prefix}/businesses", json=_payload())
 
-    response = await client.post(f"{api_prefix}/businesses", json=_payload(name="Other"))
+    response = await client.post(f"{api_prefix}/businesses", json=_payload(name="Other"), headers=as_user(uuid.uuid4()))
 
     assert response.status_code == 409
-    assert response.json()["error"]["code"] == "conflict"
+    assert "acme-solar" in response.json()["error"]["message"]
+
+
+async def test_creator_becomes_owner_of_one_business(client: AsyncClient, api_prefix: str) -> None:
+    assert (await client.get(f"{api_prefix}/me")).json()["business_id"] is None
+
+    created = await client.post(f"{api_prefix}/businesses", json=_payload())
+    second = await client.post(f"{api_prefix}/businesses", json=_payload(slug="second"))
+
+    me = (await client.get(f"{api_prefix}/me")).json()
+    assert (me["business_id"], me["role"]) == (created.json()["id"], "owner")
+    assert second.status_code == 409
+    assert second.json()["error"]["message"] == "You already belong to a business"
+
+
+async def test_other_users_business_is_not_found(client: AsyncClient, api_prefix: str) -> None:
+    created = await client.post(f"{api_prefix}/businesses", json=_payload())
+
+    response = await client.get(f"{api_prefix}/businesses/{created.json()['id']}", headers=as_user(uuid.uuid4()))
+
+    assert response.status_code == 404
 
 
 async def test_unknown_business_is_not_found(client: AsyncClient, api_prefix: str) -> None:

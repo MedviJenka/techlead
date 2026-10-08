@@ -1,3 +1,5 @@
+import { accessToken, supabase } from '../auth/supabase'
+
 const API_BASE = `/api/${import.meta.env.VITE_API_VERSION ?? 'v1'}`
 
 export class ApiError extends Error {
@@ -23,11 +25,18 @@ function describe(body: ErrorBody, status: number): ApiError {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await accessToken()
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+      ...init?.headers,
+    },
   })
   const body: unknown = await response.json().catch(() => ({}))
+  // The backend rejected the session (expired or revoked): back to the sign-in page.
+  if (response.status === 401) await supabase.auth.signOut()
   if (!response.ok) throw describe(body as ErrorBody, response.status)
   return body as T
 }

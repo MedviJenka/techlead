@@ -6,14 +6,15 @@ AI lead-management platform. See `docs/plans/MAIN_PLAN.,md`.
 
 | Path | What |
 |---|---|
-| `app/` | FastAPI backend: `api/` (thin routes) → `services/` → `repositories/` → `models/` (SQLAlchemy) |
+| `app/` | FastAPI backend: `api/` (thin routes) → `services/` → `repositories/` (Supabase client) → `models/` (typed rows) |
 | `ai/` | CrewAI layer (crews, skills, guardrails, tools) |
-| `migrations/` | Alembic migrations |
+| `db/` | The database schema: SQL files to paste into the Supabase SQL editor |
 | `frontend/` | React + Vite + TanStack Query + React Router + Tailwind |
 
 ## Prerequisites
 
 - Python 3.13 and [uv](https://docs.astral.sh/uv/)
+- A Supabase project (the only database; nothing runs locally)
 - Docker with Docker Compose >= 2.24 (`env_file` with `required: false`)
 - Node 22 (only for running the frontend outside Docker)
 
@@ -25,14 +26,35 @@ cp .env.example .env
 
 ## Database
 
-The app has one database: Supabase, via `SUPABASE_SQL_CONNECT_STRING` in `.env` (the `postgresql://...` connection
-string, not `SUPABASE_PROJECT_URL`, which is the HTTPS REST endpoint). Set `DB_TRANSACTION_POOLER=true` only when
-that string is the transaction-mode pooler (port 6543); run migrations over the direct or session-mode connection.
+The app has one database: Supabase. Every database call goes through the Supabase Python client
+(`app/core/supabase.py`), using `SUPABASE_PROJECT_URL` and `SUPABASE_SECRET_KEY` from `.env`.
 
-`alembic upgrade head` without `-x url=...` migrates **Supabase**. Alembic logs the target host before migrating.
+Create the tables by pasting the files in `db/` into the Supabase SQL editor, in numeric order:
 
-The Docker `db` service is a local Postgres used **only by pytest** (`localhost:5433`, user/password `techlead`,
-database `techlead_test`). It is not started by `docker compose up`.
+| File | What |
+|---|---|
+| `001_core_tables.sql` | `businesses`, `leads`, `activities` |
+| `002_users.sql` | `users` (app profile; `id` is the Supabase Auth user id) |
+| `003_lock_down_data_api.sql` | RLS on, publishable key gets no access, secret key (`service_role`) gets full access |
+
+Every file is safe to run again. To change the schema, edit or add a file in `db/`, run it in the SQL editor, and
+update the matching row model in `app/models/`. A new table also goes into `003_lock_down_data_api.sql`.
+`tests/platform/test_enum_check_drift.py` checks (without a database) that the SQL and the models agree.
+
+## Sign in with Google
+
+Users sign in with Google through Supabase Auth in the browser (`frontend/src/auth/supabase.ts`). The frontend sends
+the session's access token to the API, and the backend verifies it against the project's public keys
+(`app/core/auth.py`). Every API route except `/health` requires it.
+
+One-time setup:
+
+- Google Cloud: a **Web application** OAuth client whose authorized redirect URI is the Supabase callback
+  (`https://<project-ref>.supabase.co/auth/v1/callback`).
+- Supabase > Authentication > Providers > Google: enabled, with that client ID and secret. They are not needed in `.env`.
+- Supabase > Authentication > URL Configuration: Site URL `http://localhost:5173`, and add `http://localhost:5173/**`
+  to the redirect URLs.
+- `.env`: `SUPABASE_PROJECT_URL` and `SUPABASE_PUBLISHABLE_KEY`. The frontend reads only these two.
 
 ## Run everything
 
@@ -43,40 +65,62 @@ docker compose up --build
 - Frontend: http://localhost:5173
 - API: http://localhost:8000/api/v1 (docs at http://localhost:8000/docs)
 
-Ports are bound to `127.0.0.1` only. The backend container applies migrations to Supabase on start.
+Ports are bound to `127.0.0.1` only.
 
 ## Local development
 
 ```sh
 uv sync
-uv run alembic upgrade head          # migrates Supabase (SUPABASE_SQL_CONNECT_STRING)
 uv run uvicorn app.main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
 ## Checks
 
-> **WARNING:** the platform tests run `alembic downgrade base` and `TRUNCATE` every table on `TEST_DATABASE_URL`
-> (process environment variable; default `postgresql+asyncpg://techlead:techlead@localhost:5433/techlead_test`). Point it only at a disposable
-> database whose name ends in `_test`, never at dev, shared or Supabase data (the fixture refuses Supabase hosts and
-> names without `_test`).
->
-> `techlead_test` is created by `docker/postgres-init` only when the `pgdata` volume is first initialised. If your
-> volume predates that script: `docker compose exec db psql -U techlead -d techlead -c "CREATE DATABASE techlead_test OWNER techlead"`
+> **WARNING:** the platform tests delete every row in the project given by `TEST_SUPABASE_URL` /
+> `TEST_SUPABASE_SECRET_KEY` (in `.env`). Use a **separate Supabase project** just for tests and paste `db/*.sql`
+> into its SQL editor too. The fixture refuses the app's own project (`SUPABASE_PROJECT_URL`).
 
 ```sh
-docker compose up -d db              # local test Postgres
-uv run pytest                        # platform tests skip if the test DB is unreachable
-uv run ruff check app migrations tests/platform && uv run mypy
-uv run alembic -x url=postgresql+asyncpg://techlead:techlead@localhost:5433/techlead_test check   # models vs migrations (local, after pytest)
+uv run pytest                        # database tests skip if the test project is not configured
+uv run ruff check app tests/platform && uv run mypy
 cd frontend && npm run build && npm run lint
 ```
 
-## New migration
+## Phase 2: lead management
 
-`uv run alembic revision --autogenerate -m "..."`, then review the generated file.
+Open a business to see its dashboard, then choose **View & import leads** and select
+`docs/files/sample_raw_leads.json`. The import result reports created, updated, skipped, and failed records,
+with validation errors for each failed record. The lead table supports search, status/source/priority filters,
+and pagination. Open a lead to edit its status, priority, and notes or inspect its activity history.
 
-Every new table must also be locked down for Supabase in its migration: `ALTER TABLE ... ENABLE ROW LEVEL
-SECURITY` and revoke all grants from the `anon` and `authenticated` roles (guarded by a `pg_roles` check so it
-still runs on plain PostgreSQL). Copy the pattern from
-`migrations/versions/20261007_41144746c167_lock_down_supabase_data_api.py`.
+Business-scoped API routes under `/api/v1/businesses/{business_id}`:
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET / POST | `/leads` | Paginated search / normalized create-or-merge |
+| POST | `/leads/import` | Import a sample-shaped JSON envelope (up to 1,000 records) |
+| GET / PATCH | `/leads/{lead_id}` | Lead details / partial update |
+| GET | `/leads/{lead_id}/activities` | Chronological, paginated activity history |
+| GET | `/dashboard` | Counts, distributions, top open leads, recent activity |
+
+Deduplication matches within the business, in order: source + external ID, normalized email, normalized phone.
+Contact matches use the oldest matching lead. Non-null incoming fields overwrite existing values; custom fields
+are merged by key. The original source, external ID, and creation time remain unchanged on merges. Explicit
+PATCH requests can clear nullable fields and replace custom fields. Identical replays add no activities.
+Raw source payloads are retained in storage but never returned by these APIs. Imported engagement facts are
+recorded on the creation event, without inventing individual messages or calls.
+
+Lead writes for one business are serialized by an in-process lock (`app/services/lead.py`), preventing races
+between imports and manual writes; separate businesses can write concurrently. The lock only spans one backend
+process, so run a single process. A lead is saved first and its activities right after
+(two requests, not one transaction); an import saves record by record, so a record that fails validation or a constraint is reported and the rest are
+kept.
+
+Dashboard defaults: hot means high/critical priority; closed means won/lost (including `closed_won`/`closed_lost`).
+Follow-up counts open leads never contacted or last contacted over seven days ago. Inactive includes
+`unresponsive` leads and open leads with no contact for seven days since creation. The proposal card counts
+`proposal_sent` leads. P3 will add configurable rules. Scores and analysis shown in P2 come from imported data;
+these endpoints do not call an LLM. Each signed-in user belongs to one business (a `users`
+row): creating a business makes you its owner, and every other business answers 404. Inviting more users to a
+business is not built yet.

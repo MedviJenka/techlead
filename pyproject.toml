@@ -4,14 +4,13 @@ version = "0.1.0"
 # crewai 1.15 pins chromadb~=1.1, which cannot import on Python 3.14 (pydantic.v1)
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "alembic>=1.14",
-    "asyncpg>=0.30",
     "cached>=2020.12.3",
     "cellenium>=0.3.5",
     "crewai>=1.15.23",
     "fastapi>=0.115",
     "pydantic-settings>=2.15.0",
-    "sqlalchemy[asyncio]>=2.0.36",
+    "pyjwt[crypto]>=2.10",
+    "supabase>=2.32.0",
     "uvicorn[standard]>=0.30",
 ]
 
@@ -37,6 +36,10 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "RUF"]
 per-file-ignores = { "settings.py" = ["E501"] }
+
+[tool.ruff.lint.isort]
+# The repo's `supabase/` folder (Supabase CLI config) is not the `supabase` package.
+known-third-party = ["supabase"]
 
 [tool.mypy]
 python_version = "3.13"

@@ -1,4 +1,4 @@
-"""Test data builders for the platform suite. DB helpers flush (never commit) so tests control transactions."""
+"""Test data builders for the platform suite: rows are inserted straight into the test Supabase project."""
 
 import copy
 import json
@@ -6,34 +6,34 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from supabase import AsyncClient
 
 from ai.schemas.enums import ActivityType
+from app.core.supabase import to_json
 from app.models import Activity, Business, Lead
 
 SAMPLE_LEADS_PATH = Path(__file__).resolve().parents[2] / "docs" / "files" / "sample_raw_leads.json"
 
 
-async def make_business(session: AsyncSession, slug: str = "acme", **fields: Any) -> Business:
-    business = Business(name=slug.title(), slug=slug, **fields)
-    session.add(business)
-    await session.flush()
-    return business
+async def _insert(db: AsyncClient, table: str, values: dict[str, Any]) -> dict[str, Any]:
+    response = await db.table(table).insert(to_json(values)).execute()
+    row: dict[str, Any] = response.data[0]
+    return row
 
 
-async def make_lead(session: AsyncSession, business: Business, **fields: Any) -> Lead:
-    lead = Lead(business_id=business.id, **({"source": "website"} | fields))
-    session.add(lead)
-    await session.flush()
-    return lead
+async def make_business(db: AsyncClient, slug: str = "acme", **fields: Any) -> Business:
+    return Business.model_validate(await _insert(db, "businesses", {"name": slug.title(), "slug": slug} | fields))
 
 
-async def make_activity(session: AsyncSession, lead: Lead, **fields: Any) -> Activity:
+async def make_lead(db: AsyncClient, business: Business, **fields: Any) -> Lead:
+    values = {"business_id": business.id, "source": "website"} | fields
+    return Lead.model_validate(await _insert(db, "leads", values))
+
+
+async def make_activity(db: AsyncClient, lead: Lead, **fields: Any) -> Activity:
     defaults: dict[str, Any] = {"activity_type": ActivityType.LEAD_CREATED, "description": "test activity"}
-    activity = Activity(business_id=lead.business_id, lead_id=lead.id, **(defaults | fields))
-    session.add(activity)
-    await session.flush()
-    return activity
+    values = {"business_id": lead.business_id, "lead_id": lead.id} | defaults | fields
+    return Activity.model_validate(await _insert(db, "activities", values))
 
 
 @cache

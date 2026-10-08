@@ -16,7 +16,7 @@ from pydantic import AfterValidator, BeforeValidator, Field, Strict, StringConst
 
 from ai.schemas.enums import Priority, Sentiment
 
-# Column lengths mirrored from app/models/lead.py so oversize input is a 422, not a database error.
+# Column lengths mirrored from db/001_core_tables.sql so oversize input is a 422, not a database error.
 EMAIL_MAX_LENGTH = 320
 PHONE_MAX_LENGTH = 32
 TOKEN_MAX_LENGTH = 50

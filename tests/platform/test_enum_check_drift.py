@@ -1,51 +1,58 @@
-"""`ai.schemas.enums` is the source of truth for enum columns; the migrated CHECK constraints must match it.
+"""`db/*.sql` must match the Python side. No database needed: the SQL files themselves are parsed.
 
-A new enum member without a migration would pass every Python test and then fail at flush with a CHECK
-violation (a 500). These tests catch that drift against the real migrated schema.
+The Python enums are the source of truth for enum columns. A new enum member without the matching CHECK change in
+`db/*.sql` would pass every Python test and then fail at insert with a CHECK violation (a 500). Likewise a model
+field without a column (or the reverse) would fail on every read or write.
 """
 
 import re
 from enum import StrEnum
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from ai.schemas.enums import ActivityType, Channel, Priority, Sentiment
+from app.models import Activity, Business, Lead, User
+from tests.platform.conftest import ROOT
 
-# Mirrors `str_enum(..., length=32)` in app/models/base.py.
+SQL = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "db").glob("*.sql")))
 ENUM_COLUMN_LENGTH = 32
+USER_ROLES = {"owner", "manager", "sales", "admin"}
 
-ENUM_COLUMNS = [
-    ("leads", "priority", Priority, "ck_leads_lead_priority"),
-    ("leads", "sentiment", Sentiment, "ck_leads_lead_sentiment"),
-    ("activities", "activity_type", ActivityType, "ck_activities_activity_type"),
-    ("activities", "channel", Channel, "ck_activities_activity_channel"),
+ENUM_CHECKS = [
+    ("ck_leads_lead_priority", {member.value for member in Priority}),
+    ("ck_leads_lead_sentiment", {member.value for member in Sentiment}),
+    ("ck_activities_activity_type", {member.value for member in ActivityType}),
+    ("ck_activities_activity_channel", {member.value for member in Channel}),
+    ("ck_users_user_role", USER_ROLES),
 ]
 
-_CHECK_CONSTRAINTS = text(
-    """
-    SELECT con.conname, pg_get_constraintdef(con.oid)
-    FROM pg_constraint con
-    JOIN pg_class rel ON rel.oid = con.conrelid
-    JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = ANY (con.conkey)
-    WHERE con.contype = 'c' AND rel.relname = :table AND att.attname = :column
-    """
-)
-_LITERAL = re.compile(r"'([^']+)'::character varying")
+
+def _check_values(constraint: str) -> set[str]:
+    match = re.search(rf"CONSTRAINT {constraint} CHECK \(\w+ IN \((.*?)\)\)", SQL, re.DOTALL)
+    assert match, f"{constraint} not found in db/*.sql"
+    return set(re.findall(r"'([^']+)'", match.group(1)))
 
 
-@pytest.mark.parametrize(("table", "column", "enum", "constraint"), ENUM_COLUMNS)
-async def test_check_constraint_allows_exactly_the_enum_values(
-    session: AsyncSession, table: str, column: str, enum: type[StrEnum], constraint: str
-) -> None:
-    rows = (await session.execute(_CHECK_CONSTRAINTS, {"table": table, "column": column})).tuples().all()
+def _table_columns(table: str) -> set[str]:
+    match = re.search(rf"CREATE TABLE IF NOT EXISTS {table} \((.*?)\n\);", SQL, re.DOTALL)
+    assert match, f"table {table} not found in db/*.sql"
+    lines = (line.strip() for line in match.group(1).splitlines())
+    return {line.split()[0] for line in lines if line and not line.startswith(("CONSTRAINT", "FOREIGN", "'", ")"))}
 
-    assert [name for name, _ in rows] == [constraint]
-    [(_, definition)] = rows
-    assert set(_LITERAL.findall(definition)) == {member.value for member in enum}
+
+@pytest.mark.parametrize(("constraint", "values"), ENUM_CHECKS)
+def test_check_constraint_allows_exactly_the_enum_values(constraint: str, values: set[str]) -> None:
+    assert _check_values(constraint) == values
 
 
 @pytest.mark.parametrize("enum", [Priority, Sentiment, ActivityType, Channel])
 def test_enum_values_fit_the_column(enum: type[StrEnum]) -> None:
     assert all(len(member.value) <= ENUM_COLUMN_LENGTH for member in enum)
+
+
+@pytest.mark.parametrize(
+    ("table", "model"), [("businesses", Business), ("leads", Lead), ("activities", Activity), ("users", User)]
+)
+def test_table_columns_match_the_model(table: str, model: type[BaseModel]) -> None:
+    assert _table_columns(table) == set(model.model_fields)
