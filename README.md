@@ -124,10 +124,43 @@ process, so run a single process. A lead is saved first and its activities right
 (two requests, not one transaction); an import saves record by record, so a record that fails validation or a constraint is reported and the rest are
 kept.
 
-Dashboard defaults: hot means high/critical priority; closed means won/lost (including `closed_won`/`closed_lost`).
-Follow-up counts open leads never contacted or last contacted over seven days ago. Inactive includes
-`unresponsive` leads and open leads with no contact for seven days since creation. The proposal card counts
-`proposal_sent` leads. P3 will add configurable rules. Scores and analysis shown in P2 come from imported data;
-these endpoints do not call an LLM. Each signed-in user belongs to one business (a `users`
+Dashboard: hot means high/critical priority; closed statuses and follow-up timing come from the business settings
+(Phase 3). Inactive includes `unresponsive` leads and open leads with no contact for seven days since creation. The
+proposal card counts `proposal_sent` leads. These endpoints do not call an LLM. Each signed-in user belongs to one business (a `users`
 row): creating a business makes you its owner, and every other business answers 404. Inviting more users to a
 business is not built yet.
+
+## Phase 3: deterministic intelligence
+
+Open **Settings** to configure, per business, everything below; **Save and rescore leads** applies the new rules to
+every stored lead. A business that never saved settings uses the defaults. The settings live in the existing
+`businesses.configuration` and `businesses.custom_field_definitions` JSONB columns (no schema change).
+
+- **Scoring rules** (MAIN_PLAN §48). Every lead starts at a base score (default 40); each rule whose conditions
+  all hold adds its points (negative to subtract), clamped to 0-100. Rules test named lead facts built from the
+  lead row and its activity history (`app/intelligence/facts.py`): `budget_known`, `timeframe_days`, `replied`,
+  `contact_attempts`, `ignored_follow_ups`, `days_since_last_contact`, `proposal_sent`, `status`, `notes`, ... or
+  any `custom_fields.<key>`. Budget and timeframe come from the `budget` and `timeframe` custom fields; the
+  import copies them there from a record's `intent` section. The defaults are the plan's example rules.
+- **AI blend.** When a lead has an AI score it is blended in: `rules * (1 - ai_weight) + ai * ai_weight`
+  (default weight 0.4). Until the CrewAI phases, the only AI score is the one an import brings
+  (`ai.lead_score`, kept in the raw payload).
+- **Priority** follows the score through thresholds (defaults: critical 95, high 80, medium 50, else low). A
+  priority set explicitly (in the editor, the API, or by the import source) is kept until the score changes.
+- **Follow-up**: when the next contact is due, computed on read and returned on every lead (`follow_up`). Never
+  contacted: a first-response window per priority from creation; contacted: an interval per priority (or per
+  status, e.g. `proposal_sent`) from the last contact. Closed statuses need no follow-up. The dashboard's
+  "Needs follow-up" counts overdue open leads.
+- **Custom fields** (MAIN_PLAN §53): typed definitions (`text`, `number`, `boolean`, `date`, `select`). Lead
+  custom fields are checked against them on create, update and import (422 / a failed import record); keys
+  without a definition are kept as they arrive.
+
+The score is stored on every lead write with a `score_changed` activity holding the matched rules, so score
+history explains itself. Time-based rules (days since contact) move only on the next write or rescore;
+`GET /leads/{lead_id}/score` always shows the live breakdown.
+
+| Method | Route | Purpose |
+|---|---|---|
+| PUT | `/businesses/{business_id}/settings` | Replace configuration and custom field definitions |
+| POST | `/businesses/{business_id}/leads/rescore` | Recompute every lead's score and priority |
+| GET | `/businesses/{business_id}/leads/{lead_id}/score` | Live score breakdown (matched rules, AI blend) |

@@ -2,7 +2,7 @@ import { motion } from 'motion/react'
 import { Link, useNavigate } from 'react-router'
 
 import type { Lead } from '../api/types'
-import { daysSince, leadName, relativeTime } from './leadDisplay'
+import { daysSince, dueLabel, leadName, relativeTime } from './leadDisplay'
 import { Avatar, Button, EmptyState, Icon, PriorityFlag, ScoreMeter, SourceChip, StatusChip } from './ui'
 
 const PAGE_SIZE = 25
@@ -33,7 +33,9 @@ export function LeadTable({
         <p className="text-ink-muted">Try another filter, or import a JSON file.</p>
       </EmptyState>
     )
-  const columns = compact ? ['Lead', 'Status', 'Priority', 'Score'] : ['Lead', 'Source', 'Status', 'Priority', 'Score', 'Last contact']
+  const columns = compact
+    ? ['Lead', 'Status', 'Priority', 'Score']
+    : ['Lead', 'Source', 'Status', 'Priority', 'Score', 'Last contact', 'Follow-up']
   return (
     <div className={`overflow-x-auto ${bare ? '' : 'rounded-md border border-line bg-surface'}`}>
       <table className="w-full text-left text-[13px]">
@@ -93,6 +95,11 @@ export function LeadTable({
                 {!compact && (
                   <td className={`px-4 py-2.5 font-mono text-xs ${days == null || days > 7 ? 'text-hot' : 'text-ink-muted'}`}>
                     {relativeTime(lead.last_contact_at)}
+                  </td>
+                )}
+                {!compact && (
+                  <td className={`px-4 py-2.5 font-mono text-xs ${lead.follow_up?.overdue ? 'font-medium text-hot' : 'text-ink-muted'}`}>
+                    {lead.follow_up ? dueLabel(lead.follow_up) : '—'}
                   </td>
                 )}
                 <td className="pr-3">

@@ -2,10 +2,10 @@ import { motion } from 'motion/react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 
-import { useActivities, useLead, useLeadMutation } from '../api/leads'
+import { useActivities, useLead, useLeadMutation, useScore } from '../api/leads'
 import type { LeadDetail } from '../api/types'
 import { Pagination } from '../components/Leads'
-import { daysSince, inputClass, leadName, relativeTime, titleCase } from '../components/leadDisplay'
+import { daysSince, dueLabel, FOLLOW_UP_REASON, inputClass, leadName, relativeTime, titleCase } from '../components/leadDisplay'
 import { AiCard, Avatar, Button, Card, CardHeader, EmptyState, ErrorState, Icon, PriorityFlag, Skeleton, SourceChip, Stagger, StatusChip, Toast } from '../components/ui'
 import { fadeUp, scoreTone, spring } from '../components/motion'
 
@@ -106,6 +106,58 @@ function Analysis({ lead }: { lead: LeadDetail }) {
         </div>
       )}
     </AiCard>
+  )
+}
+
+function ScoreCard({ businessId, lead }: { businessId: string; lead: LeadDetail }) {
+  const score = useScore(businessId, lead.id)
+  const data = score.data
+  return (
+    <Card>
+      <CardHeader
+        title="Why this score"
+        icon="calculate"
+        action={data ? <span className="font-mono text-[11px] text-ink-subtle">now: {data.final} / 100</span> : undefined}
+      />
+      <div className="px-5 py-4 text-[13px]">
+        {score.isPending && <Skeleton className="h-24" />}
+        {score.isError && <ErrorState message={score.error.message} onRetry={() => void score.refetch()} />}
+        {data && (
+          <>
+            <ul className="divide-y divide-line">
+              <li className="flex justify-between py-1.5 text-ink-muted">
+                <span>Starting score</span>
+                <span className="font-mono">{data.base}</span>
+              </li>
+              {data.matched.map((rule) => (
+                <li key={rule.id} className="flex justify-between py-1.5">
+                  <span>{rule.label}</span>
+                  <span className={`font-mono ${rule.points < 0 ? 'text-danger' : 'text-success'}`}>
+                    {rule.points > 0 ? '+' : ''}
+                    {rule.points}
+                  </span>
+                </li>
+              ))}
+              <li className="flex justify-between py-1.5 font-semibold">
+                <span>Rules score</span>
+                <span className="font-mono">{data.deterministic}</span>
+              </li>
+            </ul>
+            {data.ai != null && (
+              <p className="mt-3 rounded-sm bg-canvas px-3 py-2 text-xs text-ink-muted">
+                Blended with the imported AI score {data.ai}: {data.deterministic} × {(1 - data.ai_weight).toFixed(1)} + {data.ai} ×{' '}
+                {data.ai_weight.toFixed(1)} = <span className="font-mono font-semibold text-ink">{data.final}</span>
+              </p>
+            )}
+            {lead.lead_score !== data.final && (
+              <p className="mt-3 text-xs text-ink-subtle">
+                The saved score ({lead.lead_score ?? '—'}) updates on the next change to this lead, or when the business rescores its leads.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </Card>
   )
 }
 
@@ -235,6 +287,18 @@ function Details({ lead }: { lead: LeadDetail }) {
           {relativeTime(lead.last_contact_at)}
         </span>
       </div>
+      {lead.follow_up && (
+        <div
+          className={`mx-4 mb-4 flex items-center justify-between rounded-sm px-3 py-2 text-[13px] ${lead.follow_up.overdue ? 'bg-hot-surface text-hot' : 'bg-canvas text-ink-muted'}`}
+          title={new Date(lead.follow_up.due_at).toLocaleString()}
+        >
+          <span>{FOLLOW_UP_REASON[lead.follow_up.reason]}</span>
+          <span className="flex items-center gap-1 font-mono text-xs">
+            <Icon name="event_upcoming" className="text-sm!" />
+            {dueLabel(lead.follow_up)}
+          </span>
+        </div>
+      )}
     </Card>
   )
 }
@@ -251,10 +315,12 @@ function LeadEditor({ businessId, lead }: { businessId: string; lead: LeadDetail
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
+    const priority = data.get('priority') || null
     update.mutate(
       {
         status: data.get('status'),
-        priority: data.get('priority') || null,
+        // Only a changed priority is sent: sending it marks it as picked by hand (kept until the score changes).
+        ...(priority !== lead.priority && { priority }),
         notes: data.get('notes') || null,
       },
       { onSuccess: () => setToast(true) },
@@ -269,7 +335,7 @@ function LeadEditor({ businessId, lead }: { businessId: string; lead: LeadDetail
             Status
             <input className={inputClass} name="status" defaultValue={lead.status} required maxLength={50} />
           </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-ink-muted">
+          <label className="flex flex-col gap-1 text-xs font-medium text-ink-muted" title="Set automatically from the score. A priority you pick stays until the score changes.">
             Priority
             <select className={inputClass} name="priority" defaultValue={lead.priority ?? ''}>
               <option value="">Unassigned</option>
@@ -346,6 +412,7 @@ export function LeadPage() {
             </Stagger>
             <Stagger className="space-y-5" step={0.1} delay={0.15}>
               <Details lead={lead} />
+              <ScoreCard businessId={businessId} lead={lead} />
               <LeadEditor businessId={businessId} lead={lead} key={lead.id} />
               <CustomFields fields={lead.custom_fields} />
             </Stagger>

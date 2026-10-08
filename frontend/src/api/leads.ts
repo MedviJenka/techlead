@@ -7,6 +7,8 @@ import type {
   Lead,
   LeadDetail,
   Page,
+  RescoreResult,
+  ScoreBreakdown,
 } from './types'
 
 export const businessPath = (id: string) => `/businesses/${id}`
@@ -22,6 +24,8 @@ export const useLeads = (id: string, query: string) =>
   useLeadData<Page<Lead>>(id, `/leads?${query}`)
 export const useLead = (id: string, leadId: string) =>
   useLeadData<LeadDetail>(id, `/leads/${leadId}`)
+export const useScore = (id: string, leadId: string) =>
+  useLeadData<ScoreBreakdown>(id, `/leads/${leadId}/score`)
 export const useActivities = (id: string, leadId: string, offset: number) =>
   useLeadData<Page<Activity>>(
     id,
@@ -45,3 +49,5 @@ export function useLeadMutation<T>(
 }
 export const useImport = (id: string) =>
   useLeadMutation<ImportResult>(id, '/leads/import')
+export const useRescore = (id: string) =>
+  useLeadMutation<RescoreResult>(id, '/leads/rescore')

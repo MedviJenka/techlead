@@ -1,4 +1,4 @@
-import type { Lead } from '../api/types'
+import type { FollowUp, Lead } from '../api/types'
 
 export const inputClass =
   'h-9 rounded-sm border border-line bg-surface px-3 text-sm text-ink placeholder:text-ink-subtle transition focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary/15'
@@ -38,3 +38,17 @@ export function relativeTime(iso: string | null): string {
 }
 
 export const isHot = (priority: string | null) => priority === 'high' || priority === 'critical'
+
+/** "in 3h", "2d overdue": when the next follow-up is due. */
+export function dueLabel(followUp: FollowUp): string {
+  const diff = new Date(followUp.due_at).getTime() - Date.now()
+  const hours = Math.abs(diff) / 3_600_000
+  const span = hours < 1 ? `${Math.max(1, Math.round(hours * 60))}m` : hours < 48 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`
+  return diff < 0 ? `${span} overdue` : `in ${span}`
+}
+
+export const FOLLOW_UP_REASON: Record<FollowUp['reason'], string> = {
+  first_response: 'First response',
+  status: 'Status follow-up',
+  interval: 'Regular follow-up',
+}

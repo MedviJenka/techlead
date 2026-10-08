@@ -1,5 +1,6 @@
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from postgrest.exceptions import APIError
@@ -8,6 +9,12 @@ from app.core.errors import ConflictError, NotFoundError
 from app.models import Business
 from app.repositories import BusinessRepository
 from app.schemas import BusinessCreate
+from app.schemas.configuration import (
+    BusinessConfiguration,
+    BusinessSettingsUpdate,
+    CustomFieldDefinition,
+    stored_definitions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +33,25 @@ async def require_business(repository: BusinessRepository, business_id: uuid.UUI
     return business
 
 
+@dataclass(frozen=True)
+class BusinessSettings:
+    """The parsed deterministic settings of one business (defaults where the stored JSON does not parse)."""
+
+    configuration: BusinessConfiguration
+    custom_fields: list[CustomFieldDefinition]
+
+    @classmethod
+    def of(cls, business: Business) -> "BusinessSettings":
+        return cls(
+            BusinessConfiguration.from_stored(business.configuration),
+            stored_definitions(business.custom_field_definitions),
+        )
+
+
+def _definitions_json(definitions: list[CustomFieldDefinition]) -> list[dict[str, Any]]:
+    return [definition.model_dump(mode="json") for definition in definitions]
+
+
 def _to_values(data: BusinessCreate) -> dict[str, Any]:
     """Explicit field mapping: only these columns are client-settable (no mass assignment)."""
     return {
@@ -33,8 +59,8 @@ def _to_values(data: BusinessCreate) -> dict[str, Any]:
         "slug": data.slug,
         "industry": data.industry,
         "timezone": data.timezone,
-        "configuration": data.configuration,
-        "custom_field_definitions": data.custom_field_definitions,
+        "configuration": data.configuration.model_dump(mode="json"),
+        "custom_field_definitions": _definitions_json(data.custom_field_definitions),
         "ai_configuration": data.ai_configuration.to_ai_configuration().model_dump(mode="json"),
     }
 
@@ -57,3 +83,15 @@ class BusinessService:
 
     async def get(self, business_id: uuid.UUID) -> Business:
         return await require_business(self._repository, business_id)
+
+    async def update_settings(self, business_id: uuid.UUID, data: BusinessSettingsUpdate) -> Business:
+        """Replace the configuration and custom field definitions. Stored lead scores change only on rescore."""
+        values = {
+            "configuration": data.configuration.model_dump(mode="json"),
+            "custom_field_definitions": _definitions_json(data.custom_field_definitions),
+        }
+        business = await self._repository.update(business_id, values)
+        if business is None:
+            raise NotFoundError(f"Business {business_id} not found")
+        logger.info("business_settings_updated", extra={"business_id": str(business_id)})
+        return business

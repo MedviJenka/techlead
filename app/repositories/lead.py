@@ -1,6 +1,6 @@
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from postgrest import CountMethod
 from supabase import AsyncClient
@@ -81,20 +81,27 @@ class LeadRepository:
         return lead
 
     async def list_all(self, business_id: uuid.UUID) -> list[LeadSummary]:
-        """Every lead of the business, fetched in pages of PostgREST's default row limit."""
-        leads: list[LeadSummary] = []
+        """Every lead of the business (summary columns), fetched in pages of PostgREST's default row limit."""
+        return [LeadSummary.model_validate(row) for row in await self._all_rows(business_id, _SUMMARY_COLUMNS)]
+
+    async def list_full(self, business_id: uuid.UUID) -> list[Lead]:
+        """Every lead of the business with all columns (for rescoring)."""
+        return [Lead.model_validate(row) for row in await self._all_rows(business_id, "*")]
+
+    async def _all_rows(self, business_id: uuid.UUID, columns: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
         while True:
             response = (
                 await self._db.table("leads")
-                .select(_SUMMARY_COLUMNS)
+                .select(columns)
                 .eq("business_id", str(business_id))
                 .order("id")
-                .range(len(leads), len(leads) + _MAX_ROWS - 1)
+                .range(len(rows), len(rows) + _MAX_ROWS - 1)
                 .execute()
             )
-            leads += [LeadSummary.model_validate(row) for row in response.data]
+            rows += cast(list[dict[str, Any]], response.data)
             if len(response.data) < _MAX_ROWS:
-                return leads
+                return rows
 
     async def list_page(self, business_id: uuid.UUID, params: LeadListParams) -> tuple[list[LeadSummary], int]:
         """One page ordered newest first (``created_at DESC, id DESC``) plus the total match count."""

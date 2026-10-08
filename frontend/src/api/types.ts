@@ -29,11 +29,34 @@ export type Business = {
   slug: string
   industry: string | null
   timezone: string
-  configuration: Record<string, unknown>
-  custom_field_definitions: Record<string, unknown>[]
+  configuration: BusinessConfiguration
+  custom_field_definitions: CustomFieldDefinition[]
   ai_configuration: AIConfiguration
   created_at: string
   updated_at: string
+}
+
+// app/schemas/configuration.py: deterministic scoring, priority and follow-up settings.
+export type PriorityName = 'critical' | 'high' | 'medium' | 'low'
+export type Scalar = string | number | boolean
+export type ConditionOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'contains' | 'exists' | 'missing'
+export type Condition = { fact: string; op: ConditionOp; value: Scalar | Scalar[] | null }
+export type ScoringRule = { id: string; label: string; points: number; when: Condition[] }
+export type BusinessConfiguration = {
+  closed_statuses: string[]
+  scoring: { base_score: number; ai_weight: number; rules: ScoringRule[] }
+  priority: { critical: number; high: number; medium: number }
+  follow_up: {
+    first_response_hours: Record<PriorityName, number>
+    interval_hours: Record<PriorityName, number>
+    status_interval_hours: Record<string, number>
+  }
+}
+export type CustomFieldType = 'text' | 'number' | 'boolean' | 'date' | 'select'
+export type CustomFieldDefinition = { key: string; label: string; type: CustomFieldType; options: string[] }
+export type BusinessSettings = {
+  configuration: BusinessConfiguration
+  custom_field_definitions: CustomFieldDefinition[]
 }
 
 export type BusinessCreate = {
@@ -66,7 +89,23 @@ export type Lead = {
   last_contact_at: string | null
   created_at: string
   updated_at: string
+  // Lead list and detail only (not the dashboard's top leads); null for closed leads.
+  follow_up?: FollowUp | null
 }
+export type FollowUp = {
+  due_at: string
+  overdue: boolean
+  reason: 'first_response' | 'status' | 'interval'
+}
+export type ScoreBreakdown = {
+  base: number
+  deterministic: number
+  ai: number | null
+  ai_weight: number
+  final: number
+  matched: { id: string; label: string; points: number }[]
+}
+export type RescoreResult = { total: number; changed: number }
 export type LeadDetail = Lead & {
   notes: string | null
   ai_summary: string | null

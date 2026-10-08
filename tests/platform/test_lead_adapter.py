@@ -41,7 +41,14 @@ async def test_lead_001_maps_every_field() -> None:
     assert (data.lead_score, data.sentiment) == (92, Sentiment.POSITIVE)
     assert data.ai_summary == "High-intent lead with clear budget and purchase timeframe."
     assert data.recommended_action == "Contact within 1 hour"
-    assert data.custom_fields == {"city": "Tel Aviv", "mortgage_approved": True}
+    assert data.custom_fields == {
+        "product_or_service": "premium apartment",
+        "budget": 2500000,
+        "currency": "ILS",
+        "timeframe": "1-3 months",
+        "city": "Tel Aviv",
+        "mortgage_approved": True,
+    }
     assert adapted.raw_payload == record
     assert adapted.history == ContactHistory(preferred_channel=Channel.WHATSAPP, contact_attempts=0, replied=False)
 
@@ -85,6 +92,19 @@ async def test_unmapped_keys_live_only_in_raw_payload() -> None:
     for key in ("preferred_channel", "industry", "budget", "currency", "timeframe", "contact_attempts", "replied"):
         assert key not in dumped
     assert adapted.raw_payload["intent"]["budget"] == 2500000
+
+
+async def test_explicit_custom_fields_win_over_intent_and_nulls_are_dropped() -> None:
+    record = raw_lead(1, custom_fields={"timeframe": "next week"})
+
+    adapted = await _parse(record)
+
+    # lead_002 has a null budget: not copied.
+    assert adapted.data.custom_fields == {
+        "product_or_service": "consultation",
+        "currency": "ILS",
+        "timeframe": "next week",
+    }
 
 
 async def test_missing_sections_are_tolerated() -> None:

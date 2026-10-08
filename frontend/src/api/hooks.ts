@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiFetch } from './client'
-import type { Business, BusinessCreate, HealthStatus, Me } from './types'
+import type { Business, BusinessCreate, BusinessSettings, HealthStatus, Me } from './types'
 
 export const queryKeys = {
   health: ['health'] as const,
@@ -39,5 +39,14 @@ export function useCreateBusiness() {
       queryClient.setQueryData(queryKeys.business(business.id), business)
       return queryClient.invalidateQueries({ queryKey: queryKeys.me })
     },
+  })
+}
+
+export function useUpdateSettings(id: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (settings: BusinessSettings) =>
+      apiFetch<Business>(`/businesses/${id}/settings`, { method: 'PUT', body: JSON.stringify(settings) }),
+    onSuccess: (business) => queryClient.setQueryData(queryKeys.business(id), business),
   })
 }

@@ -1,36 +1,33 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import DashboardServiceDep, LeadServiceDep
-from app.models import Lead
+from app.core.clock import utc_now as utc_now  # re-export: tests override this dependency
+from app.intelligence import ScoreBreakdown
 from app.schemas.activity import ActivityRead
 from app.schemas.common import Page
 from app.schemas.dashboard import DashboardSummary
-from app.schemas.lead import LeadCreate, LeadListParams, LeadRead, LeadSummary, LeadUpdate
+from app.schemas.lead import LeadCreate, LeadListItem, LeadListParams, LeadRead, LeadUpdate, RescoreResult
 from app.schemas.lead_import import ImportEnvelope, ImportResult
 
 router = APIRouter(prefix="/businesses/{business_id}", tags=["leads"])
 
 
-def utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
-@router.get("/leads", response_model=Page[LeadSummary])
+@router.get("/leads", response_model=Page[LeadListItem])
 async def list_leads(
     business_id: uuid.UUID,
     service: LeadServiceDep,
     params: Annotated[LeadListParams, Query()],
-) -> Page[LeadSummary]:
+) -> Page[LeadListItem]:
     return await service.list(business_id, params)
 
 
 @router.post("/leads", response_model=LeadRead)
-async def create_lead(business_id: uuid.UUID, payload: LeadCreate, service: LeadServiceDep) -> Lead:
-    return await service.create(business_id, payload)
+async def create_lead(business_id: uuid.UUID, payload: LeadCreate, service: LeadServiceDep) -> LeadRead:
+    return await service.read(await service.create(business_id, payload))
 
 
 @router.post("/leads/import", response_model=ImportResult)
@@ -38,14 +35,26 @@ async def import_leads(business_id: uuid.UUID, payload: ImportEnvelope, service:
     return await service.import_batch(business_id, payload)
 
 
+@router.post("/leads/rescore", response_model=RescoreResult)
+async def rescore_leads(business_id: uuid.UUID, service: LeadServiceDep) -> RescoreResult:
+    return await service.rescore(business_id)
+
+
 @router.get("/leads/{lead_id}", response_model=LeadRead)
-async def get_lead(business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadServiceDep) -> Lead:
-    return await service.get(business_id, lead_id)
+async def get_lead(business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadServiceDep) -> LeadRead:
+    return await service.read(await service.get(business_id, lead_id))
 
 
 @router.patch("/leads/{lead_id}", response_model=LeadRead)
-async def update_lead(business_id: uuid.UUID, lead_id: uuid.UUID, payload: LeadUpdate, service: LeadServiceDep) -> Lead:
-    return await service.update(business_id, lead_id, payload)
+async def update_lead(
+    business_id: uuid.UUID, lead_id: uuid.UUID, payload: LeadUpdate, service: LeadServiceDep
+) -> LeadRead:
+    return await service.read(await service.update(business_id, lead_id, payload))
+
+
+@router.get("/leads/{lead_id}/score", response_model=ScoreBreakdown)
+async def lead_score(business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadServiceDep) -> ScoreBreakdown:
+    return await service.score(business_id, lead_id)
 
 
 @router.get("/leads/{lead_id}/activities", response_model=Page[ActivityRead])

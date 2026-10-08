@@ -22,6 +22,7 @@ from app.ingestion.normalize import (
     Token50,
     UtcDatetime,
 )
+from app.intelligence.follow_up import FollowUp
 from app.schemas.common import check_json_size
 
 DEFAULT_PAGE_LIMIT = 25
@@ -136,7 +137,20 @@ class LeadSummary(BaseModel):
     updated_at: datetime
 
 
-class LeadRead(LeadSummary):
+class LeadListItem(LeadSummary):
+    """A table row: the summary plus when the next contact is due (None for closed leads)."""
+
+    follow_up: FollowUp | None = None
+
+
+class LeadRead(LeadListItem):
     notes: str | None
     ai_summary: str | None
     custom_fields: dict[str, Any]
+
+
+class RescoreResult(BaseModel):
+    """``POST /leads/rescore``: how many leads were checked and how many had their score or priority changed."""
+
+    total: int
+    changed: int

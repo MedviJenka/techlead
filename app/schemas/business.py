@@ -1,21 +1,24 @@
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 from zoneinfo import available_timezones
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationInfo, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator
 
 from ai.schemas.business import AIConfiguration
 from app.schemas.common import MAX_JSON_FIELD_BYTES as MAX_JSON_FIELD_BYTES  # re-export (backward compat)
-from app.schemas.common import check_json_size
+from app.schemas.configuration import (
+    MAX_CUSTOM_FIELD_DEFINITIONS,
+    BusinessConfiguration,
+    CustomFieldDefinition,
+    check_unique_keys,
+    stored_definitions,
+)
 
 SLUG_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 
 # Computed once: available_timezones() walks the tzdata tree on every call.
 KNOWN_TIMEZONES: frozenset[str] = frozenset(available_timezones())
-
-# Cap for list entries on the public create endpoint (the JSON byte cap is MAX_JSON_FIELD_BYTES, re-exported).
-MAX_CUSTOM_FIELD_DEFINITIONS = 100
 
 MAX_EXTRA_SKILLS = 10
 SkillName = Annotated[str, StringConstraints(min_length=1, max_length=100, pattern=SLUG_PATTERN)]
@@ -49,8 +52,8 @@ class BusinessCreate(BaseModel):
     slug: str = Field(min_length=1, max_length=100, pattern=SLUG_PATTERN)
     industry: str | None = Field(default=None, max_length=100)
     timezone: str = "UTC"
-    configuration: dict[str, Any] = Field(default_factory=dict)
-    custom_field_definitions: list[dict[str, Any]] = Field(
+    configuration: BusinessConfiguration = Field(default_factory=BusinessConfiguration)
+    custom_field_definitions: list[CustomFieldDefinition] = Field(
         default_factory=list, max_length=MAX_CUSTOM_FIELD_DEFINITIONS
     )
     ai_configuration: AIConfigurationInput = Field(default_factory=AIConfigurationInput)
@@ -62,10 +65,10 @@ class BusinessCreate(BaseModel):
             raise ValueError(f"unknown IANA timezone: {value}")
         return value
 
-    @field_validator("configuration", "custom_field_definitions")
+    @field_validator("custom_field_definitions")
     @classmethod
-    def _bounded_json(cls, value: Any, info: ValidationInfo) -> Any:
-        return check_json_size(value, info.field_name or "value")
+    def _unique_keys(cls, value: list[CustomFieldDefinition]) -> list[CustomFieldDefinition]:
+        return check_unique_keys(value)
 
 
 class BusinessRead(BaseModel):
@@ -76,8 +79,9 @@ class BusinessRead(BaseModel):
     slug: str
     industry: str | None
     timezone: str
-    configuration: dict[str, Any]
-    custom_field_definitions: list[dict[str, Any]]
+    # Effective settings: stored values that do not parse read as the defaults.
+    configuration: Annotated[BusinessConfiguration, BeforeValidator(BusinessConfiguration.from_stored)]
+    custom_field_definitions: Annotated[list[CustomFieldDefinition], BeforeValidator(stored_definitions)]
     ai_configuration: AIConfiguration
     created_at: datetime
     updated_at: datetime

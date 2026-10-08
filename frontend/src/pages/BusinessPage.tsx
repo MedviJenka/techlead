@@ -16,7 +16,7 @@ const KPIS: { key: keyof Counts; label: string; icon: string; hint: string; filt
   { key: 'new', label: 'New', icon: 'fiber_new', hint: 'Leads with status "new".', filter: 'status=new' },
   { key: 'hot', label: 'Hot', icon: 'local_fire_department', hint: 'High or critical priority.' },
   { key: 'qualified', label: 'Qualified', icon: 'verified', hint: 'Leads with status "qualified".', filter: 'status=qualified' },
-  { key: 'needs_follow_up', label: 'Needs follow-up', icon: 'schedule', hint: 'Open leads never contacted, or last contacted over 7 days ago.' },
+  { key: 'needs_follow_up', label: 'Needs follow-up', icon: 'schedule', hint: 'Open leads past their follow-up time (see Settings).' },
   { key: 'waiting_for_proposal', label: 'Waiting for proposal', icon: 'request_quote', hint: 'Qualified leads waiting for a proposal.' },
   { key: 'inactive', label: 'Inactive', icon: 'bedtime', hint: 'Marked inactive, or open with no contact for over 7 days since creation.' },
   { key: 'average_score', label: 'Avg score', icon: 'speed', hint: 'Mean lead score, 0–100.' },

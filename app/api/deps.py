@@ -1,10 +1,12 @@
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import Depends
 from supabase import AsyncClient
 
 from app.core.auth import CurrentUser
+from app.core.clock import utc_now
 from app.core.supabase import get_supabase
 from app.repositories import BusinessRepository
 from app.services import BusinessService
@@ -34,8 +36,8 @@ async def require_business_access(business_id: uuid.UUID, user: CurrentUser, ser
     await service.require_access(user, business_id)
 
 
-def get_lead_service(db: SupabaseDep) -> LeadService:
-    return LeadService(db)
+def get_lead_service(db: SupabaseDep, now: Annotated[datetime, Depends(utc_now)]) -> LeadService:
+    return LeadService(db, now)
 
 
 def get_dashboard_service(db: SupabaseDep) -> DashboardService:

@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from supabase import AsyncClient
@@ -25,6 +26,12 @@ class BusinessRepository:
         """Insert and return the stored row (with id and timestamps). A taken slug raises ``APIError`` 23505."""
         response = await self._db.table("businesses").insert(to_json(values)).execute()
         return Business.model_validate(response.data[0])
+
+    async def update(self, business_id: uuid.UUID, values: dict[str, Any]) -> Business | None:
+        """Update columns and return the stored row, or None when the business does not exist."""
+        changes = to_json(values | {"updated_at": datetime.now(UTC)})
+        response = await self._db.table("businesses").update(changes).eq("id", str(business_id)).execute()
+        return Business.model_validate(response.data[0]) if response.data else None
 
     async def delete(self, business_id: uuid.UUID) -> None:
         """Delete the business and, by cascade, everything it owns."""

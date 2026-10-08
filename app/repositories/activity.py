@@ -5,6 +5,9 @@ from supabase import AsyncClient
 
 from app.models import Activity
 
+# PostgREST caps each response at this many rows (Supabase default).
+_MAX_ROWS = 1000
+
 
 class ActivityRepository:
     """Tenant-scoped activity log. Activities are written only with their lead, by ``LeadRepository.save``."""
@@ -43,3 +46,27 @@ class ActivityRepository:
             .execute()
         )
         return [Activity.model_validate(row) for row in response.data]
+
+    async def all_for_lead(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> list[Activity]:
+        """Every activity of one lead, chronological."""
+        return await self._all(business_id, lead_id=str(lead_id))
+
+    async def all_for_business(self, business_id: uuid.UUID) -> list[Activity]:
+        """Every activity of the business, chronological (for rescoring all leads at once)."""
+        return await self._all(business_id)
+
+    async def _all(self, business_id: uuid.UUID, **equals: str) -> list[Activity]:
+        activities: list[Activity] = []
+        while True:
+            query = self._db.table("activities").select("*").eq("business_id", str(business_id))
+            for column, value in equals.items():
+                query = query.eq(column, value)
+            response = (
+                await query.order("created_at")
+                .order("id")
+                .range(len(activities), len(activities) + _MAX_ROWS - 1)
+                .execute()
+            )
+            activities += [Activity.model_validate(row) for row in response.data]
+            if len(response.data) < _MAX_ROWS:
+                return activities
