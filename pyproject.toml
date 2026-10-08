@@ -8,6 +8,7 @@ dependencies = [
     "cellenium>=0.3.5",
     "crewai>=1.15.23",
     "fastapi>=0.115",
+    "logfire>=5.1.1",
     "pydantic-settings>=2.15.0",
     "pyjwt[crypto]>=2.10",
     "supabase>=2.32.0",

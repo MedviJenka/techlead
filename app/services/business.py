@@ -1,4 +1,3 @@
-import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -6,6 +5,7 @@ from typing import Any
 from postgrest.exceptions import APIError
 
 from app.core.errors import ConflictError, NotFoundError
+from app.core.logging import Logger
 from app.models import Business
 from app.repositories import BusinessRepository
 from app.schemas import BusinessCreate
@@ -16,7 +16,7 @@ from app.schemas.configuration import (
     stored_definitions,
 )
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 UNIQUE_VIOLATION = "23505"
 
@@ -71,6 +71,7 @@ class BusinessService:
 
     async def create(self, data: BusinessCreate) -> Business:
         if await self._repository.get_by_slug(data.slug) is not None:
+            logger.fire("business_slug_taken", level="warning", slug=data.slug)
             raise _slug_taken(data.slug)
         try:
             business = await self._repository.add(_to_values(data))
@@ -78,7 +79,7 @@ class BusinessService:
             if exc.code != UNIQUE_VIOLATION:
                 raise
             raise _slug_taken(data.slug) from exc  # lost a race with a concurrent create of the same slug
-        logger.info("business_created", extra={"business_id": str(business.id), "slug": business.slug})
+        logger.fire("business_created", business_id=str(business.id), slug=business.slug)
         return business
 
     async def get(self, business_id: uuid.UUID) -> Business:
@@ -93,5 +94,9 @@ class BusinessService:
         business = await self._repository.update(business_id, values)
         if business is None:
             raise NotFoundError(f"Business {business_id} not found")
-        logger.info("business_settings_updated", extra={"business_id": str(business_id)})
+        logger.fire(
+            "business_settings_updated",
+            business_id=str(business_id),
+            custom_fields=len(data.custom_field_definitions),
+        )
         return business

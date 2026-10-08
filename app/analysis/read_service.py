@@ -1,4 +1,5 @@
-"""The `ai.ports.LeadReadService` the crew's tools read during one analysis.
+"""
+The `ai.ports.LeadReadService` the crew's tools read during one analysis.
 
 The AI protocol is synchronous and the app's database client is async, so the service reads from snapshots loaded
 before the crew starts. It holds one business and one lead: an agent cannot reach any other tenant or lead.

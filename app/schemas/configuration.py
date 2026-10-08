@@ -4,15 +4,15 @@
 types the keys of `leads.custom_fields`. Every section has defaults, so a business with `{}` gets working rules.
 """
 
-import logging
 import re
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 
 from ai.schemas.enums import Priority
+from app.core.logging import Logger
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 MAX_SCORING_RULES = 50
 MAX_RULE_CONDITIONS = 5
@@ -181,7 +181,7 @@ class BusinessConfiguration(_Strict):
         try:
             return cls.model_validate(value or {})
         except ValidationError:
-            logger.warning("business_configuration_invalid; using defaults")
+            logger.fire("business_configuration_invalid; using defaults", level="warning")
             return cls()
 
 
@@ -221,7 +221,8 @@ def stored_definitions(value: Any) -> list[CustomFieldDefinition]:
         try:
             definitions.append(CustomFieldDefinition.model_validate(entry))
         except ValidationError:
-            logger.warning("custom_field_definition_invalid; skipped")
+            key = entry.get("key") if isinstance(entry, dict) else None
+            logger.fire("custom_field_definition_invalid; skipped", level="warning", key=key)
     return definitions
 
 

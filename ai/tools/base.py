@@ -1,9 +1,10 @@
+import logging
 from typing import Self
-
 from crewai.tools import BaseTool
 from pydantic import BaseModel, PrivateAttr
-
 from ai.ports import LeadReadService, NotFoundError
+
+logger = logging.getLogger(__name__)
 
 
 class NoArguments(BaseModel):
@@ -31,6 +32,11 @@ class BusinessScopedTool(BaseTool):
     def business_id(self) -> str:
         return self._business_id
 
-    @staticmethod
-    def not_found(error: NotFoundError) -> str:
+    def not_found(self, error: NotFoundError) -> str:
+        logger.warning(
+            "tool_not_found", extra={"tool": self.name, "business_id": self.business_id, "error": str(error)}
+        )
         return f"ERROR: {error}. Do not guess; continue with the information you have."
+
+    def _run(self) -> None:
+        """implement tool here"""
