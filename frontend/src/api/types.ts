@@ -106,6 +106,30 @@ export type ScoreBreakdown = {
   matched: { id: string; label: string; points: number }[]
 }
 export type RescoreResult = { total: number; changed: number }
+// POST /leads/{id}/analyze (app/schemas/analysis.py). The recommendation is advice; its priority is the AI's view.
+export type LeadAnalysis = {
+  lead: LeadDetail
+  qualification: {
+    qualified: boolean
+    confidence: number
+    intent: string
+    urgency: string
+    fit: string
+    missing_information: string[]
+    positive_signals: string[]
+    negative_signals: string[]
+    summary: string
+  }
+  ai_score: { overall_ai_score: number; reasons: string[] }
+  recommendation: {
+    action: string
+    priority: string
+    reason: string
+    due_at: string | null
+    requires_human_approval: boolean
+    talking_points: string[]
+  }
+}
 export type LeadDetail = Lead & {
   notes: string | null
   ai_summary: string | null

@@ -2221,12 +2221,12 @@ POST   /api/v1/businesses/{business_id}/leads/rescore
 GET    /api/v1/businesses/{business_id}/leads/{lead_id}/score
 GET    /api/v1/businesses/{business_id}/leads/{lead_id}/activities
 GET    /api/v1/businesses/{business_id}/dashboard
+POST   /api/v1/businesses/{business_id}/leads/{lead_id}/analyze   (runs LeadIntelligenceCrew; LLM calls)
 ```
 
 Planned:
 
 ```text
-POST   /api/v1/businesses/{business_id}/leads/{lead_id}/analyze
 POST   /api/v1/businesses/{business_id}/ai/query
 ```
 
@@ -2574,6 +2574,9 @@ ScoringAgent
 NextActionAgent
 ```
 
+Status: done in `ai/` (agents, tasks, skills, read-only tools, guardrails, structured outputs, crew factory), tested
+with a scripted LLM. Connected to the app by `app/analysis/` (snapshots of one lead, read through `ai.ports`).
+
 ---
 
 # 64. Phase 5 — Lead Intelligence Crew
@@ -2597,6 +2600,10 @@ RecommendNextActionTask
 Test against sample leads.
 
 Verify structured output.
+
+Status: done. `POST .../leads/{lead_id}/analyze` runs the crew on demand and saves its summary, next action and
+AI score (an `ai_analysis` activity), blended into the deterministic score. Not done: a run against a real LLM in
+CI, and evaluation of answer quality on the sample leads.
 
 ---
 

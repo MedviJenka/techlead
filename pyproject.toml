@@ -47,3 +47,8 @@ packages = ["app"]
 plugins = ["pydantic.mypy"]
 strict = true
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# `ai/` is outside the strict `app` scope: use its types, but report errors only in `app`.
+module = ["ai.*"]
+follow_imports = "silent"

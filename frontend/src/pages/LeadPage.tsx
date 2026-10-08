@@ -2,7 +2,7 @@ import { motion } from 'motion/react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 
-import { useActivities, useLead, useLeadMutation, useScore } from '../api/leads'
+import { useActivities, useAnalyze, useLead, useLeadMutation, useScore } from '../api/leads'
 import type { LeadDetail } from '../api/types'
 import { Pagination } from '../components/Leads'
 import { daysSince, dueLabel, FOLLOW_UP_REASON, inputClass, leadName, relativeTime, titleCase } from '../components/leadDisplay'
@@ -82,27 +82,90 @@ function LeadHeader({ lead }: { lead: LeadDetail }) {
   )
 }
 
-function Analysis({ lead }: { lead: LeadDetail }) {
-  if (!lead.ai_summary && !lead.recommended_action && !lead.sentiment) return null
+function Signals({ title, items, tone }: { title: string; items: string[]; tone: string }) {
+  if (!items.length) return null
+  return (
+    <div className="mt-3">
+      <p className="font-mono text-[11px] font-medium tracking-wide text-ink-subtle uppercase">{title}</p>
+      <ul className="mt-1 space-y-0.5 text-[13px]">
+        {items.map((item) => (
+          <li key={item} className="flex gap-1.5">
+            <Icon name="chevron_right" className={`text-base! ${tone}`} />
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function Analysis({ businessId, lead }: { businessId: string; lead: LeadDetail }) {
+  const analyze = useAnalyze(businessId, lead.id)
+  const result = analyze.data
+  const hasAnalysis = Boolean(result || lead.ai_summary || lead.recommended_action || lead.sentiment)
   return (
     <AiCard
       title="Lead analysis"
-      meta="imported"
-      why={<>This analysis came with the imported record. Techlead shows it as advice; check it against the timeline before you act.</>}
+      meta={
+        <Button
+          type="button"
+          variant="ai"
+          size="sm"
+          icon={analyze.isPending ? 'progress_activity' : 'auto_awesome'}
+          disabled={analyze.isPending}
+          onClick={() => analyze.mutate({})}
+        >
+          {analyze.isPending ? 'Analyzing…' : hasAnalysis ? 'Analyze again' : 'Analyze with AI'}
+        </Button>
+      }
+      why={
+        <>
+          AI agents read this lead and its timeline, then qualify it, score it and suggest a next action. Their score is blended into the rules score (see
+          “Why this score”); the priority stays rule-based. Every suggestion is advice: nothing is sent or changed in your CRM.
+        </>
+      }
     >
-      {lead.ai_summary && <p className="leading-relaxed">{lead.ai_summary}</p>}
-      {lead.sentiment && (
+      {analyze.isError && <ErrorState message={analyze.error.message} />}
+      {!hasAnalysis && !analyze.isError && <p className="text-ink-muted">No analysis yet. It takes a few seconds and uses your AI provider.</p>}
+      {(result?.qualification.summary ?? lead.ai_summary) && <p className="leading-relaxed">{result?.qualification.summary ?? lead.ai_summary}</p>}
+      {result && (
+        <div className="mt-3 flex flex-wrap gap-1.5 font-mono text-[11px]">
+          {[
+            result.qualification.qualified ? 'Qualified' : 'Not qualified',
+            `Confidence ${Math.round(result.qualification.confidence * 100)}%`,
+            `Intent ${result.qualification.intent}`,
+            `Urgency ${result.qualification.urgency}`,
+            `Fit ${result.qualification.fit}`,
+            `AI score ${result.ai_score.overall_ai_score}`,
+          ].map((label) => (
+            <span key={label} className="rounded-sm border border-ai/20 bg-surface/70 px-2 py-1">
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+      {!result && lead.sentiment && (
         <span className="mt-3 inline-flex rounded-sm border border-ai/20 bg-surface/70 px-2 py-1 font-mono text-[11px]">
           Sentiment: <span className="ml-1 font-semibold text-ai">{titleCase(lead.sentiment)}</span>
         </span>
       )}
-      {lead.recommended_action && (
+      {result && (
+        <>
+          <Signals title="Positive signals" items={result.qualification.positive_signals} tone="text-success" />
+          <Signals title="Concerns" items={result.qualification.negative_signals} tone="text-danger" />
+          <Signals title="Still unknown" items={result.qualification.missing_information} tone="text-ink-subtle" />
+        </>
+      )}
+      {(result?.recommendation.action ?? lead.recommended_action) && (
         <div className="mt-4 rounded-md border border-ai/25 bg-surface/80 p-3.5">
           <p className="flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-wide text-ai uppercase">
             <Icon name="target" className="text-base!" />
             Recommended next action
+            {result?.recommendation.requires_human_approval && <span className="ml-auto text-warning normal-case">needs approval</span>}
           </p>
-          <p className="mt-1.5 font-medium">{lead.recommended_action}</p>
+          <p className="mt-1.5 font-medium">{titleCase(result?.recommendation.action ?? lead.recommended_action ?? '')}</p>
+          {result && <p className="mt-1 text-[13px] text-ink-muted">{result.recommendation.reason}</p>}
+          {result && <Signals title="Talking points" items={result.recommendation.talking_points} tone="text-ai" />}
         </div>
       )}
     </AiCard>
@@ -145,7 +208,7 @@ function ScoreCard({ businessId, lead }: { businessId: string; lead: LeadDetail 
             </ul>
             {data.ai != null && (
               <p className="mt-3 rounded-sm bg-canvas px-3 py-2 text-xs text-ink-muted">
-                Blended with the imported AI score {data.ai}: {data.deterministic} × {(1 - data.ai_weight).toFixed(1)} + {data.ai} ×{' '}
+                Blended with the AI score {data.ai}: {data.deterministic} × {(1 - data.ai_weight).toFixed(1)} + {data.ai} ×{' '}
                 {data.ai_weight.toFixed(1)} = <span className="font-mono font-semibold text-ink">{data.final}</span>
               </p>
             )}
@@ -407,7 +470,7 @@ export function LeadPage() {
           <LeadHeader lead={lead} />
           <div className="grid items-start gap-5 lg:grid-cols-3">
             <Stagger className="space-y-5 lg:col-span-2" step={0.1}>
-              <Analysis lead={lead} />
+              <Analysis businessId={businessId} lead={lead} key={lead.id} />
               <Timeline businessId={businessId} leadId={leadId} key={`${businessId}/${leadId}`} />
             </Stagger>
             <Stagger className="space-y-5" step={0.1} delay={0.15}>

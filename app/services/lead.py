@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
@@ -12,23 +13,25 @@ from pydantic import ValidationError
 from supabase import AsyncClient
 
 from ai.schemas.enums import ActivityType
-from app.core.errors import NotFoundError, UnprocessableError
+from app.analysis import AnalysisEngine, to_activity_snapshot, to_business_profile, to_lead_snapshot
+from app.core.errors import BadGatewayError, NotFoundError, UnprocessableError
 from app.ingestion.adapters import AdaptedLead, JsonLeadAdapter, record_errors
 from app.intelligence import (
     Event,
     ScoreBreakdown,
+    ai_score,
     custom_field_errors,
     lead_facts,
     next_follow_up,
     priority_for,
     score_lead,
-    upstream_ai_score,
 )
-from app.models import Activity, Lead
+from app.models import Activity, Business, Lead
 from app.repositories.activity import ActivityRepository
 from app.repositories.business import BusinessRepository
 from app.repositories.lead import LeadRepository
 from app.schemas.activity import ActivityRead
+from app.schemas.analysis import LeadAnalysis
 from app.schemas.common import Page, RecordError
 from app.schemas.lead import (
     LeadCreate,
@@ -41,6 +44,8 @@ from app.schemas.lead import (
 )
 from app.schemas.lead_import import ImportEnvelope, ImportOutcome, ImportRecordResult, ImportResult
 from app.services.business import BusinessSettings, require_business
+
+logger = logging.getLogger(__name__)
 
 # PostgreSQL SQLSTATE class 23: integrity constraint violation (unique, check, foreign key, not null).
 _INTEGRITY_ERROR_CLASS = "23"
@@ -86,13 +91,16 @@ class LeadService:
         self.businesses = BusinessRepository(db)
         self.activities = ActivityRepository(db)
         self.now = now
-        self._settings: dict[uuid.UUID, BusinessSettings] = {}
+        self._businesses: dict[uuid.UUID, Business] = {}
+
+    async def business(self, business_id: uuid.UUID) -> Business:
+        """The business, or ``NotFoundError``. Loaded once per service (one request)."""
+        if business_id not in self._businesses:
+            self._businesses[business_id] = await require_business(self.businesses, business_id)
+        return self._businesses[business_id]
 
     async def settings(self, business_id: uuid.UUID) -> BusinessSettings:
-        """The business's parsed settings, or ``NotFoundError``. Loaded once per service (one request)."""
-        if business_id not in self._settings:
-            self._settings[business_id] = BusinessSettings.of(await require_business(self.businesses, business_id))
-        return self._settings[business_id]
+        return BusinessSettings.of(await self.business(business_id))
 
     async def get(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> Lead:
         await self.settings(business_id)
@@ -127,6 +135,44 @@ class LeadService:
         lead = await self.get(business_id, lead_id)
         activities = await self.activities.all_for_lead(business_id, lead_id)
         return self._breakdown(await self.settings(business_id), lead, _events(activities))
+
+    async def analyze(self, business_id: uuid.UUID, lead_id: uuid.UUID, engine: AnalysisEngine) -> LeadAnalysis:
+        """Run the AI crew on the lead, then save its summary, next action and AI score (blended into the score).
+
+        The crew runs outside the business lock (it takes seconds); the result is applied to the lead as it is then.
+        """
+        business = await self.business(business_id)
+        lead = await self.get(business_id, lead_id)
+        activities = await self.activities.all_for_lead(business_id, lead_id)
+        try:
+            result = await engine.analyze(
+                to_business_profile(business),
+                to_lead_snapshot(lead, activities),
+                [to_activity_snapshot(activity) for activity in activities],
+            )
+        except Exception as exc:
+            logger.exception("lead_analysis_failed", extra={"business_id": str(business_id), "lead_id": str(lead_id)})
+            raise BadGatewayError("AI analysis failed; try again later") from exc
+        metadata = {
+            "ai_score": result.ai_score.overall_ai_score,
+            "qualified": result.qualification.qualified,
+            "recommended_action": result.recommendation.action.value,
+            "qualification": result.qualification.model_dump(mode="json"),
+            "score": result.ai_score.model_dump(mode="json"),
+            "recommendation": result.recommendation.model_dump(mode="json"),
+        }
+        analysis = _activity(ActivityType.AI_ANALYSIS, "AI analysis", metadata)
+        values = {"ai_summary": result.qualification.summary, "recommended_action": result.recommendation.action.value}
+        settings = await self.settings(business_id)
+        async with _business_locks[business_id]:
+            current = await self.get(business_id, lead_id)
+            saved = await self._apply(settings, current, values, extra=[analysis]) or current
+        return LeadAnalysis(
+            lead=await self.read(saved),
+            qualification=result.qualification,
+            ai_score=result.ai_score,
+            recommendation=result.recommendation,
+        )
 
     async def create(self, business_id: uuid.UUID, data: LeadCreate) -> Lead:
         settings = await self.settings(business_id)
@@ -164,7 +210,7 @@ class LeadService:
 
     def _breakdown(self, settings: BusinessSettings, lead: Lead, events: Sequence[Event]) -> ScoreBreakdown:
         facts = lead_facts(lead, events, self.now)
-        return score_lead(settings.configuration.scoring, facts, lead.custom_fields, upstream_ai_score(lead))
+        return score_lead(settings.configuration.scoring, facts, lead.custom_fields, ai_score(lead, events))
 
     def _derive(
         self, settings: BusinessSettings, lead: Lead, values: dict[str, Any], events: Sequence[Event]
@@ -265,19 +311,26 @@ class LeadService:
         return await self.leads.save(business_id, None, derived, [created, _score_changed(None, breakdown)])
 
     async def _apply(
-        self, settings: BusinessSettings, lead: Lead, values: dict[str, Any], events: Sequence[Event] | None = None
+        self,
+        settings: BusinessSettings,
+        lead: Lead,
+        values: dict[str, Any],
+        events: Sequence[Event] | None = None,
+        extra: Sequence[dict[str, Any]] = (),
     ) -> Lead | None:
         """Save the values (plus derived score and priority) that differ from ``lead``, with their activities.
 
-        The saved lead, or None if nothing changed. ``events`` are the lead's activities when already loaded.
+        The saved lead, or None if nothing changed and there is no ``extra`` activity to record (``extra`` is
+        written first and counts for the score). ``events`` are the lead's activities when already loaded.
         """
         if events is None:
             events = _events(await self.activities.all_for_lead(lead.business_id, lead.id))
+        events = [*events, *(Event(a["activity_type"], self.now, a["metadata"]) for a in extra)]
         derived, breakdown = self._derive(settings, lead, values, events)
         changes = {key: value for key, value in derived.items() if getattr(lead, key) != value}
-        if not changes:
+        if not changes and not extra:
             return None
-        activities = []
+        activities = list(extra)
         if set(changes) - {"lead_score", "priority"}:
             activities.append(_activity(ActivityType.LEAD_UPDATED, "Lead updated", {"fields": sorted(changes)}))
         if "status" in changes:
