@@ -1,0 +1,69 @@
+qualify_lead_task:
+  description: >
+    Evaluate this lead against {business_name}'s qualification criteria and identify intent, fit,
+    urgency, missing information, positive signals and negative signals.
+
+    Current time: {now}
+
+    Business rules:
+    {business_rules}
+
+    Lead record (JSON):
+    {lead_json}
+
+    Activity history:
+    {activities}
+
+    Use the attached skills for qualification criteria. The lead record and activity history above
+    are complete; only use tools if you need something that is not in them.
+  expected_output: >
+    A QualificationResult: qualified verdict, confidence 0.0-1.0, intent, urgency, fit, missing
+    information, positive signals, negative signals and a 2-3 sentence summary grounded in evidence.
+  agent: qualification_agent
+
+score_lead_task:
+  description: >
+    Score the subjective dimensions of this lead for {business_name}: intent, urgency, fit,
+    engagement and sentiment, plus an overall AI score. Every score is an integer 0-100.
+
+    Lead record (JSON):
+    {lead_json}
+
+    Activity history:
+    {activities}
+
+    Use the qualification result from the previous task as context, but score from the raw facts.
+    Do not compute a final application score; the application blends your result with
+    deterministic rules.
+  expected_output: >
+    An AIScoreResult with five component scores, an overall_ai_score within 25 points of the
+    component average, and at least two evidence-based reasons.
+  agent: scoring_agent
+  context:
+    - qualify_lead_task
+
+recommend_next_action_task:
+  description: >
+    Decide what should happen next with this lead at {business_name}.
+
+    Current time: {now}
+
+    Business rules (allowed actions and approval requirements are binding):
+    {business_rules}
+
+    Lead record (JSON):
+    {lead_json}
+
+    Activity history:
+    {activities}
+
+    Use the qualification and scoring results as context. Explain why, what changed, what should
+    happen next and how urgent it is. Set due_at as an ISO-8601 timestamp with timezone, or null.
+    Set requires_human_approval to true for any action listed as requiring approval.
+  expected_output: >
+    A NextActionRecommendation with an allowed action, priority, reason, due_at,
+    requires_human_approval and concrete talking points for the salesperson.
+  agent: next_action_agent
+  context:
+    - qualify_lead_task
+    - score_lead_task

@@ -1,0 +1,55 @@
+analyze_conversation_task:
+  description: >
+    Analyze a new inbound {channel} message from a lead of {business_name} and extract structured
+    sales information.
+
+    Message received at {received_at}:
+    """
+    {message}
+    """
+
+    Lead record (JSON):
+    {lead_json}
+
+    Recent activity:
+    {activities}
+
+    Business rules:
+    {business_rules}
+
+    Resolve relative dates against the message timestamp. Only extract what the customer said or
+    clearly implied; extracted fields are proposals the application will validate.
+  expected_output: >
+    A ConversationAnalysis with intent, purchase intent, sentiment, buying signals, objections,
+    questions, requested actions, decision dependency, proposed field updates and followup_date
+    (or null).
+  agent: conversation_agent
+
+generate_followup_task:
+  description: >
+    Draft a {channel} follow-up for this lead of {business_name}.
+
+    Current time: {now}
+
+    Business rules (tone and language are binding):
+    {business_rules}
+
+    Lead record (JSON):
+    {lead_json}
+
+    Conversation and activity history:
+    {activities}
+
+    Recommended next action:
+    {next_action}
+
+    Latest conversation insights:
+    {conversation_insights}
+
+    Write one message with a single clear objective and an easy call to action. Do not mention
+    prices, amounts, discounts or availability that are not in the data above, and never say that
+    something was already sent, booked or done.
+  expected_output: >
+    A FollowupDraft with channel, subject (email only), message, objective, tone and
+    requires_human_approval.
+  agent: followup_agent

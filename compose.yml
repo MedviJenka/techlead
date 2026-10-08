@@ -1,0 +1,27 @@
+name: techlead
+
+services:
+  backend:
+    container_name: techlead-backend
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    container_name: techlead-frontend
+    build: ./frontend
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+      # Google sign-in in the browser: only the public URL and publishable key, never the secret key.
+      SUPABASE_PROJECT_URL: ${SUPABASE_PROJECT_URL:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - backend
