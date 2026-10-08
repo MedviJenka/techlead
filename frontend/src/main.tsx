@@ -11,6 +11,7 @@ import { HomePage } from './pages/HomePage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { LeadsPage } from './pages/LeadsPage'
 import { LeadPage } from './pages/LeadPage'
+import { SettingsPage } from './pages/SettingsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000 } },
@@ -24,6 +25,7 @@ const router = createBrowserRouter([
       { path: '/businesses/:businessId', element: <BusinessPage /> },
       { path: '/businesses/:businessId/leads', element: <LeadsPage /> },
       { path: '/businesses/:businessId/leads/:leadId', element: <LeadPage /> },
+      { path: '/businesses/:businessId/settings', element: <SettingsPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

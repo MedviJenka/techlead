@@ -77,11 +77,25 @@ class JsonLeadAdapter(LeadAdapter):
         return AdaptedLead(data=data, raw_payload=copy.deepcopy(record), history=_history(sections))
 
 
+# Intent keys copied into custom_fields (where scoring rules read them, e.g. `budget`, `timeframe`).
+_INTENT_CUSTOM_FIELDS = ("product_or_service", "budget", "currency", "timeframe")
+
+
+def _custom_fields(record: dict[str, Any], sections: _RawSections) -> Any:
+    """The record's ``custom_fields`` plus its non-null intent keys; explicit custom fields win."""
+    custom_fields = record.get("custom_fields")
+    if custom_fields is None:
+        custom_fields = {}
+    if not isinstance(custom_fields, dict):
+        return custom_fields  # rejected by LeadImportData validation
+    intent = sections.intent or {}
+    return {key: intent[key] for key in _INTENT_CUSTOM_FIELDS if intent.get(key) is not None} | custom_fields
+
+
 def _flatten(record: dict[str, Any], sections: _RawSections) -> dict[str, Any]:
     contact = sections.contact or {}
     engagement = sections.engagement or {}
     ai = sections.ai or {}
-    custom_fields = record.get("custom_fields")
     return {
         "external_id": record.get("lead_id"),
         "source": record.get("source"),
@@ -99,7 +113,7 @@ def _flatten(record: dict[str, Any], sections: _RawSections) -> dict[str, Any]:
         "sentiment": ai.get("sentiment"),
         "ai_summary": ai.get("summary"),
         "recommended_action": ai.get("recommended_action"),
-        "custom_fields": {} if custom_fields is None else custom_fields,
+        "custom_fields": _custom_fields(record, sections),
     }
 
 

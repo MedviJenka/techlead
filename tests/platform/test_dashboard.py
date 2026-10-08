@@ -7,6 +7,7 @@ from typing import Any
 from ai.schemas.enums import ActivityType, Channel, Priority
 from app.models import Activity
 from app.schemas import Bucket, LeadSummary
+from app.schemas.configuration import BusinessConfiguration
 from app.services.dashboard import STALE_AFTER, summarize
 
 T0 = datetime(2026, 10, 7, 8, 0, tzinfo=UTC)
@@ -71,8 +72,8 @@ def test_aggregates() -> None:
 
     counts = summary.counts
     assert [counts.total, counts.new, counts.hot, counts.qualified, counts.waiting_for_proposal] == [5, 1, 3, 1, 1]
-    # new lead (never contacted) is the only open lead needing follow-up; inactive adds the unresponsive one.
-    assert (counts.needs_follow_up, counts.inactive) == (1, 1)
+    # Every open lead is past its default follow-up window by NOW; inactive adds the unresponsive one.
+    assert (counts.needs_follow_up, counts.inactive) == (4, 1)
     assert counts.average_score == 59.75
     assert _buckets(summary.by_source) == [("website", 4), ("email", 1)]
     assert _buckets(summary.by_status) == [
@@ -119,3 +120,15 @@ def test_recent_activity_keeps_order_and_adds_lead_name() -> None:
 
     assert [row.lead_name for row in rows] == [None, "Omer Tal"]
     assert (rows[0].id, rows[0].channel) == (latest.id, Channel.PHONE)
+
+
+def test_follow_up_and_closed_statuses_follow_the_configuration() -> None:
+    contacted = _lead(0, status="contacted", priority=Priority.LOW, last_contact_at=NOW - timedelta(hours=100))
+    done = _lead(1, status="archived", last_contact_at=NOW - timedelta(days=30))
+    config = BusinessConfiguration(closed_statuses=["archived"])
+
+    # Low priority: due 168 hours after the last contact by default; "archived" is closed, so never due.
+    assert summarize([contacted, done], [], NOW, config).counts.needs_follow_up == 0
+
+    config.follow_up.interval_hours[Priority.LOW] = 72
+    assert summarize([contacted, done], [], NOW, config).counts.needs_follow_up == 1

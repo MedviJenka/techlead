@@ -34,7 +34,7 @@ function navItems(businessId: string | null): NavItem[] {
     base ? { to: `${base}/leads`, label: 'Leads', icon: 'groups' } : { label: 'Leads', icon: 'groups', soon: true },
     { label: 'Follow-ups', icon: 'outgoing_mail', soon: true },
     { label: 'Assistant', icon: 'auto_awesome', soon: true },
-    { label: 'Settings', icon: 'settings', soon: true },
+    base ? { to: `${base}/settings`, label: 'Settings', icon: 'settings' } : { label: 'Settings', icon: 'settings', soon: true },
   ]
 }
 
@@ -140,7 +140,15 @@ function Sidebar({ session, businessId }: { session: Session; businessId: string
 
 function Breadcrumb() {
   const { pathname } = useLocation()
-  const parts = pathname.includes('/leads/') ? ['Leads', 'Lead'] : pathname.endsWith('/leads') ? ['Leads'] : pathname.startsWith('/businesses') ? ['Dashboard'] : ['Welcome']
+  const parts = pathname.includes('/leads/')
+    ? ['Leads', 'Lead']
+    : pathname.endsWith('/leads')
+      ? ['Leads']
+      : pathname.endsWith('/settings')
+        ? ['Settings']
+        : pathname.startsWith('/businesses')
+          ? ['Dashboard']
+          : ['Welcome']
   return (
     <nav aria-label="Breadcrumb" className="hidden items-center gap-1.5 text-[13px] text-ink-subtle lg:flex">
       <Icon name="home" className="text-base!" />

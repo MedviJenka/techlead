@@ -2210,12 +2210,15 @@ GET    /api/v1/me                                       (signed-in user and thei
 
 POST   /api/v1/businesses                               (caller becomes owner; one business per user)
 GET    /api/v1/businesses/{business_id}
+PUT    /api/v1/businesses/{business_id}/settings        (scoring, priority, follow-up, custom fields)
 
 POST   /api/v1/businesses/{business_id}/leads
 GET    /api/v1/businesses/{business_id}/leads
 GET    /api/v1/businesses/{business_id}/leads/{lead_id}
 PATCH  /api/v1/businesses/{business_id}/leads/{lead_id}
 POST   /api/v1/businesses/{business_id}/leads/import
+POST   /api/v1/businesses/{business_id}/leads/rescore
+GET    /api/v1/businesses/{business_id}/leads/{lead_id}/score
 GET    /api/v1/businesses/{business_id}/leads/{lead_id}/activities
 GET    /api/v1/businesses/{business_id}/dashboard
 ```
@@ -2535,6 +2538,11 @@ follow-up rules
 ```
 
 Do this before CrewAI.
+
+Status: done. Settings live in the existing `businesses` JSONB columns (`app/schemas/configuration.py`); the rules
+are pure functions in `app/intelligence/`. The AI part of the score is, for now, the score an import brings.
+Not built: per-role permissions on who may change settings (any member can), automatic rescoring over time
+(time-based rules apply on the next write or an explicit rescore), and follow-up actions (Phase 8).
 
 ---
 

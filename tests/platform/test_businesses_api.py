@@ -13,12 +13,14 @@ def _payload(**overrides: Any) -> dict[str, Any]:
 
 
 async def test_create_and_get_business(client: AsyncClient, api_prefix: str) -> None:
-    created = await client.post(f"{api_prefix}/businesses", json=_payload(configuration={"rules": {"x": 1}}))
+    thresholds = {"critical": 90, "high": 70, "medium": 40}
+    created = await client.post(f"{api_prefix}/businesses", json=_payload(configuration={"priority": thresholds}))
 
     assert created.status_code == 201
     body = created.json()
     assert body["slug"] == "acme-solar"
-    assert body["configuration"] == {"rules": {"x": 1}}
+    assert body["configuration"]["priority"] == thresholds
+    assert body["configuration"]["closed_statuses"] == ["won", "lost", "closed_won", "closed_lost"]
     assert body["ai_configuration"]["autonomy_level"] == AutonomyLevel.DRAFT_ONLY
 
     fetched = await client.get(f"{api_prefix}/businesses/{body['id']}")
@@ -95,3 +97,34 @@ async def test_wrong_method_uses_error_envelope(client: AsyncClient, api_prefix:
     assert response.status_code == 405
     assert response.json()["error"]["code"] == "http_error"
     assert "allow" in response.headers
+
+
+async def test_update_settings_replaces_configuration_and_custom_fields(client: AsyncClient, api_prefix: str) -> None:
+    business = (await client.post(f"{api_prefix}/businesses", json=_payload())).json()
+    settings = {
+        "configuration": {"closed_statuses": ["archived"], "scoring": {"base_score": 10, "rules": []}},
+        "custom_field_definitions": [{"key": "rooms", "label": "Rooms", "type": "number"}],
+    }
+
+    response = await client.put(f"{api_prefix}/businesses/{business['id']}/settings", json=settings)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configuration"]["closed_statuses"] == ["archived"]
+    assert body["configuration"]["scoring"] == {"base_score": 10, "ai_weight": 0.4, "rules": []}
+    assert body["custom_field_definitions"] == [{"key": "rooms", "label": "Rooms", "type": "number", "options": []}]
+    assert (await client.get(f"{api_prefix}/businesses/{business['id']}")).json() == body
+
+
+async def test_update_settings_validates_and_checks_membership(client: AsyncClient, api_prefix: str) -> None:
+    business = (await client.post(f"{api_prefix}/businesses", json=_payload())).json()
+    path = f"{api_prefix}/businesses/{business['id']}/settings"
+    valid = {"configuration": {}, "custom_field_definitions": []}
+    bad_rule = {"id": "x", "label": "X", "points": 5, "when": [{"fact": "favourite_colour", "op": "eq", "value": 1}]}
+
+    invalid = await client.put(path, json=valid | {"configuration": {"scoring": {"rules": [bad_rule]}}})
+    stranger = await client.put(path, json=valid, headers=as_user(uuid.uuid4()))
+
+    assert invalid.status_code == 422
+    assert "unknown fact 'favourite_colour'" in invalid.json()["error"]["message"]
+    assert stranger.status_code == 404

@@ -28,14 +28,21 @@ async def test_sample_import_replay_and_dashboard(client: AsyncClient, api_prefi
     assert replay.json()["skipped"] == count
     lead_id = imported.json()["results"][0]["lead_id"]
     timeline = (await client.get(f"{path}/leads/{lead_id}/activities")).json()
-    assert timeline["total"] == 1
-    assert timeline["items"][0]["metadata"]["imported"] is True
+    events = {row["activity_type"]: row["metadata"] for row in timeline["items"]}
+    assert set(events) == {"lead_created", "score_changed"}
+    assert events["lead_created"]["imported"] is True
+    # lead_001: base 40 + budget known 10 = 50, blended with the source's AI score 92: 50 * 0.6 + 92 * 0.4 = 66.8.
+    assert events["score_changed"] == {"from": None, "to": 67, "deterministic": 50, "ai": 92, "rules": ["budget_known"]}
     listing = (await client.get(f"{path}/leads?limit=2")).json()
     assert listing["total"] == count and len(listing["items"]) == 2
     assert "raw_payload" not in listing["items"][0]
     details = (await client.get(f"{path}/leads/{lead_id}")).json()
-    assert details["first_name"] == "Daniel" and details["lead_score"] == 92
+    assert details["first_name"] == "Daniel" and details["lead_score"] == 67
+    assert details["priority"] == "high"  # the source's priority is explicit input and is kept
+    assert details["follow_up"]["reason"] == "first_response"
     assert "raw_payload" not in details
+    assert (await client.get(f"{path}/leads/{lead_id}/score")).json()["final"] == 67
+    assert (await client.post(f"{path}/leads/rescore")).json() == {"total": count, "changed": 0}
     dashboard = await client.get(f"{path}/dashboard")
     assert dashboard.status_code == 200, dashboard.text
     assert dashboard.json()["counts"]["total"] == count
@@ -96,7 +103,8 @@ async def test_concurrent_contact_deduplication(client: AsyncClient, api_prefix:
     assert all(response.status_code == 200 for response in responses)
     assert len({response.json()["id"] for response in responses}) == 1
     lead_id = responses[0].json()["id"]
-    assert (await client.get(f"{path}/leads/{lead_id}/activities")).json()["total"] == 1
+    activities = (await client.get(f"{path}/leads/{lead_id}/activities")).json()["items"]
+    assert sorted(row["activity_type"] for row in activities) == ["lead_created", "score_changed"]
 
 
 async def test_filters_validation_and_missing_business(client: AsyncClient, api_prefix: str) -> None:
@@ -178,5 +186,25 @@ async def test_dedup_precedence_phone_and_score_history(client: AsyncClient, api
     )
     assert score.json()["updated"] == 1
     timeline = (await client.get(f"{path}/leads/{second['id']}/activities")).json()
-    changes = [row for row in timeline["items"] if row["activity_type"] == "score_changed"]
-    assert len(changes) == 1 and changes[0]["metadata"] == {"from": None, "to": 85}
+    changes = [row["metadata"] for row in timeline["items"] if row["activity_type"] == "score_changed"]
+    # Scored 40 (the base) on creation; the import's AI score 85 then blends in: 40 * 0.6 + 85 * 0.4 = 58.
+    assert [(change["from"], change["to"]) for change in changes] == [(None, 40), (40, 58)]
+    assert changes[1] == {"from": 40, "to": 58, "deterministic": 40, "ai": 85, "rules": []}
+
+
+async def test_custom_field_definitions_are_enforced(client: AsyncClient, api_prefix: str) -> None:
+    path = await business_path(client, api_prefix)
+    settings = {
+        "configuration": {},
+        "custom_field_definitions": [{"key": "rooms", "label": "Rooms", "type": "number"}],
+    }
+    assert (await client.put(f"{path}/settings", json=settings)).status_code == 200
+
+    bad = await client.post(f"{path}/leads", json={"source": "web", "custom_fields": {"rooms": "four"}})
+    good = await client.post(f"{path}/leads", json={"source": "web", "custom_fields": {"rooms": 4}})
+
+    assert bad.status_code == 422
+    assert bad.json()["error"]["details"] == [
+        {"loc": ["custom_fields", "rooms"], "msg": "must be a number", "type": "custom_field"}
+    ]
+    assert good.status_code == 200 and good.json()["custom_fields"] == {"rooms": 4}

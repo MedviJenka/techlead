@@ -10,7 +10,8 @@ from app.core.errors import ConflictError
 from app.models import Business
 from app.repositories import BusinessRepository
 from app.schemas import BusinessCreate
-from app.schemas.business import MAX_CUSTOM_FIELD_DEFINITIONS, MAX_EXTRA_SKILLS, MAX_JSON_FIELD_BYTES
+from app.schemas.business import MAX_CUSTOM_FIELD_DEFINITIONS, MAX_EXTRA_SKILLS
+from app.schemas.configuration import BusinessConfiguration
 from app.services.business import BusinessService
 
 
@@ -62,7 +63,7 @@ def test_ai_configuration_input_is_bounded(ai_configuration: dict[str, Any]) -> 
         _create(ai_configuration=ai_configuration)
 
 
-# --- schema: timezone and free-form JSON caps (no DB) ---
+# --- schema: timezone, configuration and custom field definitions (no DB) ---
 
 
 def test_known_timezone_accepted_and_unknown_rejected() -> None:
@@ -71,18 +72,22 @@ def test_known_timezone_accepted_and_unknown_rejected() -> None:
         _create(timezone="Mars/Olympus")
 
 
-def test_configuration_size_is_capped() -> None:
-    _create(configuration={"blob": "x" * (MAX_JSON_FIELD_BYTES - 100)})
+def test_configuration_defaults_and_rejects_unknown_keys() -> None:
+    assert _create().configuration == BusinessConfiguration()
     with pytest.raises(ValidationError):
-        _create(configuration={"blob": "x" * MAX_JSON_FIELD_BYTES})
+        _create(configuration={"blob": "x"})
 
 
-def test_custom_field_definitions_size_and_length_are_capped() -> None:
-    _create(custom_field_definitions=[{"key": "k"}] * MAX_CUSTOM_FIELD_DEFINITIONS)
+def _definition(index: int) -> dict[str, Any]:
+    return {"key": f"field_{index}", "label": f"Field {index}", "type": "text"}
+
+
+def test_custom_field_definitions_are_capped_and_unique() -> None:
+    _create(custom_field_definitions=[_definition(i) for i in range(MAX_CUSTOM_FIELD_DEFINITIONS)])
     with pytest.raises(ValidationError):
-        _create(custom_field_definitions=[{"key": "k"}] * (MAX_CUSTOM_FIELD_DEFINITIONS + 1))
-    with pytest.raises(ValidationError):
-        _create(custom_field_definitions=[{"blob": "x" * MAX_JSON_FIELD_BYTES}])
+        _create(custom_field_definitions=[_definition(i) for i in range(MAX_CUSTOM_FIELD_DEFINITIONS + 1)])
+    with pytest.raises(ValidationError, match="duplicate custom field keys: field_1"):
+        _create(custom_field_definitions=[_definition(1), _definition(1)])
 
 
 # --- service (test Supabase project) ---

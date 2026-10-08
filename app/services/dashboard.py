@@ -7,15 +7,15 @@ from datetime import datetime, timedelta
 from supabase import AsyncClient
 
 from ai.schemas.enums import Priority
+from app.intelligence import next_follow_up
 from app.models import Activity
 from app.repositories import ActivityRepository, BusinessRepository, LeadRepository
+from app.schemas.configuration import BusinessConfiguration
 from app.schemas.dashboard import Bucket, DashboardCounts, DashboardSummary, RecentActivity
 from app.schemas.lead import LeadSummary
-from app.services.business import require_business
+from app.services.business import BusinessSettings, require_business
 
-# P2 display rules; configurable scoring and follow-up automation belong to P3.
 HOT_PRIORITIES = frozenset({Priority.HIGH, Priority.CRITICAL})
-CLOSED_STATUSES = frozenset({"won", "lost", "closed_won", "closed_lost"})
 PRIORITY_RANK: dict[Priority | None, int] = {
     None: 0,
     Priority.LOW: 1,
@@ -47,10 +47,22 @@ def _top_rank(lead: LeadSummary) -> tuple[int, int, datetime, uuid.UUID]:
     return PRIORITY_RANK[lead.priority], score, lead.created_at, lead.id
 
 
-def summarize(leads: list[LeadSummary], activities: list[Activity], now: datetime) -> DashboardSummary:
-    """Dashboard from all of a business's leads and its latest activities."""
+def _overdue(config: BusinessConfiguration, lead: LeadSummary, now: datetime) -> bool:
+    follow_up = next_follow_up(config, lead, now)
+    return follow_up is not None and follow_up.overdue
+
+
+def summarize(
+    leads: list[LeadSummary],
+    activities: list[Activity],
+    now: datetime,
+    config: BusinessConfiguration | None = None,
+) -> DashboardSummary:
+    """Dashboard from all of a business's leads and its latest activities, under the business's configuration."""
+    config = config or BusinessConfiguration()
+    closed = frozenset(config.closed_statuses)
     stale_before = now - STALE_AFTER
-    open_leads = [lead for lead in leads if lead.status not in CLOSED_STATUSES]
+    open_leads = [lead for lead in leads if lead.status not in closed]
     scores = [lead.lead_score for lead in leads if lead.lead_score is not None]
     counts = DashboardCounts(
         total=len(leads),
@@ -58,10 +70,10 @@ def summarize(leads: list[LeadSummary], activities: list[Activity], now: datetim
         hot=sum(lead.priority in HOT_PRIORITIES for lead in leads),
         qualified=sum(lead.status == "qualified" for lead in leads),
         waiting_for_proposal=sum(lead.status == "proposal_sent" for lead in leads),
-        needs_follow_up=sum(lead.last_contact_at is None or lead.last_contact_at < stale_before for lead in open_leads),
+        needs_follow_up=sum(_overdue(config, lead, now) for lead in open_leads),
         inactive=sum(
             lead.status == "unresponsive"
-            or (lead.status not in CLOSED_STATUSES and (lead.last_contact_at or lead.created_at) < stale_before)
+            or (lead.status not in closed and (lead.last_contact_at or lead.created_at) < stale_before)
             for lead in leads
         ),
         average_score=sum(scores) / len(scores) if scores else None,
@@ -89,9 +101,9 @@ class DashboardService:
         self.activities = ActivityRepository(db)
 
     async def summary(self, business_id: uuid.UUID, now: datetime) -> DashboardSummary:
-        await require_business(self.businesses, business_id)
+        settings = BusinessSettings.of(await require_business(self.businesses, business_id))
         leads, activities = await asyncio.gather(
             self.leads.list_all(business_id),
             self.activities.recent(business_id, RECENT_ACTIVITY_LIMIT),
         )
-        return summarize(leads, activities, now)
+        return summarize(leads, activities, now, settings.configuration)
