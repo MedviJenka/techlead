@@ -387,6 +387,10 @@ JsonLeadAdapter
 WebhookLeadAdapter
 ```
 
+Normalize phone numbers to E.164 at ingestion. Deduplication by phone and WhatsApp matching both depend on it.
+
+Record every inbound webhook event in `ingest_events` before processing it (see Idempotency).
+
 Later:
 
 ```text
@@ -1721,6 +1725,9 @@ mark deal lost
 change high-value opportunity status
 ```
 
+Approval must happen where the owner already is: the proposed message is sent to the owner on WhatsApp/Telegram
+with Approve / Edit / Reject. The dashboard is the fallback, not the main approval surface.
+
 Later, businesses may configure autonomy levels.
 
 Example:
@@ -2052,6 +2059,18 @@ recent activity
 highest priority leads
 ```
 
+Outcome metrics (what the customer pays for), shown first:
+
+```text
+median time to first response
+
+leads with no response
+
+leads recovered (stale leads that replied after a follow-up)
+```
+
+The headline is "leads lost this week", ideally 0.
+
 ---
 
 # 51. Lead Detail
@@ -2268,6 +2287,9 @@ guardrail failures
 
 Do not log sensitive conversation content unnecessarily.
 
+Trace shape (Logfire): one span per request and one span per Crew/Flow run, with log records inside it, so one
+lead's whole processing reads as a single trace. Do not open a span per log record.
+
 This information will be extremely useful when debugging customer-specific behavior.
 
 ---
@@ -2303,6 +2325,11 @@ deduplication
 authorization
 simple business rules
 ```
+
+Track token cost per business per run (stored with the run). Each business has a monthly AI budget; when it is
+reached, AI runs pause (leads are still saved and scored deterministically) and the owner is notified.
+
+Start with one LLM provider. Add others only when cost or quality forces it.
 
 ---
 
@@ -2342,6 +2369,9 @@ analysis_pending
 
 Retry AI independently.
 
+AI runs never execute inside an API request. A request (or a saved lead) enqueues a job; a worker runs the crew,
+retries with backoff, and stores the result. The API returns immediately with `analysis_pending`.
+
 ---
 
 # 59. Idempotency
@@ -2369,6 +2399,9 @@ external_event_id
 ```
 
 and/or idempotency keys.
+
+Store inbound events in an `ingest_events` table with a unique `(business_id, source, external_event_id)`. A repeat
+insert is a no-op, and the event is processed once.
 
 ---
 
@@ -2450,6 +2483,10 @@ Requirements:
 ---
 
 # 62. Implementation Phases
+
+Order: the core and AI foundation (Phases 1–5), then one channel working end to end with real customers
+(Phases 6–7), then breadth (Phases 8–12). Phases 6–7 deliver the main promise ("you do not lose leads"); every
+later phase should be justified by what paying customers ask for.
 
 ## Phase 1 — Core Platform
 
@@ -2542,7 +2579,7 @@ Do this before CrewAI.
 Status: done. Settings live in the existing `businesses` JSONB columns (`app/schemas/configuration.py`); the rules
 are pure functions in `app/intelligence/`. The AI part of the score is, for now, the score an import brings.
 Not built: per-role permissions on who may change settings (any member can), automatic rescoring over time
-(time-based rules apply on the next write or an explicit rescore), and follow-up actions (Phase 8).
+(time-based rules apply on the next write or an explicit rescore), and follow-up actions (Phase 9).
 
 ---
 
@@ -2609,6 +2646,19 @@ CI, and evaluation of answer quality on the sample leads.
 
 # 65. Phase 6 — NewLeadFlow
 
+Prerequisites (production foundations):
+
+```text
+background AI jobs: a worker runs crews; POST /analyze enqueues instead of blocking (see Failure Handling)
+
+separate worker image: CrewAI and its dependencies are not in the API image
+
+per-business write lock in the database (Postgres advisory lock or unique constraint + upsert),
+replacing the in-process asyncio lock, so more than one backend process is safe
+
+lead + activity written in one transaction (a Supabase RPC), so no lead is saved without its history
+```
+
 Implement:
 
 ```text
@@ -2633,9 +2683,42 @@ Next action
 Priority route
 ```
 
+The flow runs automatically when a lead is saved (as a background job), not only on demand.
+
+Done when: the AI evaluation set (see Testing) passes against the real model, and cost per lead is recorded.
+
 ---
 
-# 66. Phase 7 — Conversation Intelligence
+# 66. Phase 7 — First Channel End to End
+
+Pull one channel forward from Phase 11 and make the main promise work for one niche:
+
+```text
+one inbound channel (WhatsApp or Meta Lead Ads, whichever the first customers use)
+
+webhook ingestion with ingest_events (idempotent)
+
+E.164 phone normalization
+
+NewLeadFlow on every new lead
+
+draft first reply within 60 seconds
+
+owner approval on their phone (Approve / Edit / Reject)
+
+outcome metrics on the dashboard (time to first response, leads with no response)
+```
+
+Onboarding: the business starts from an industry preset (skills, custom fields, scoring, approval rules) and only
+adjusts it. Target: a new business is live in under 10 minutes, not a custom project.
+
+Choose one niche (real estate, insurance or automotive: whichever customers are reachable) and one market.
+
+Done when: 3–5 businesses use it daily, and at least one pays.
+
+---
+
+# 67. Phase 8 — Conversation Intelligence
 
 Add:
 
@@ -2651,7 +2734,7 @@ Support test messages before integrating WhatsApp/email.
 
 ---
 
-# 67. Phase 8 — Follow-Up System
+# 68. Phase 9 — Follow-Up System
 
 Add:
 
@@ -2671,7 +2754,9 @@ Do NOT auto-send.
 
 ---
 
-# 68. Phase 9 — AI Sales Assistant
+# 69. Phase 10 — AI Sales Assistant
+
+Build only when paying customers ask for it.
 
 Add:
 
@@ -2697,9 +2782,9 @@ Which opportunities might close?
 
 ---
 
-# 69. Phase 10 — External Integrations
+# 70. Phase 11 — External Integrations
 
-After core product works:
+The first channel is built in Phase 7. Add the rest in the order customers need them:
 
 ```text
 WhatsApp
@@ -2719,7 +2804,7 @@ Integrations should use adapters and Tools rather than changing core business lo
 
 ---
 
-# 70. Phase 11 — Business Customization Engine
+# 71. Phase 12 — Business Customization Engine
 
 Implement configuration-driven:
 
@@ -2745,9 +2830,11 @@ Create:
 BusinessCrewFactory
 ```
 
+Phase 7 industry presets are the first step; this phase generalizes them into self-serve configuration.
+
 ---
 
-# 71. Initial MVP Agents
+# 72. Initial MVP Agents
 
 Do NOT start with seven agents.
 
@@ -2779,7 +2866,7 @@ BusinessQueryAgent
 
 ---
 
-# 72. Initial MVP Skills
+# 73. Initial MVP Skills
 
 Start with:
 
@@ -2803,7 +2890,7 @@ or whichever real customer is available first.
 
 ---
 
-# 73. Initial MVP Tasks
+# 74. Initial MVP Tasks
 
 Start with:
 
@@ -2817,7 +2904,7 @@ RecommendNextActionTask
 
 ---
 
-# 74. Initial MVP Flow
+# 75. Initial MVP Flow
 
 Only implement:
 
@@ -2831,7 +2918,7 @@ Prove the architecture first.
 
 ---
 
-# 75. First CrewAI Milestone
+# 76. First CrewAI Milestone
 
 Given:
 
@@ -2870,9 +2957,13 @@ Schedule technical discovery call immediately.
 
 All results must be persisted as structured application data.
 
+AI evaluation set: sample leads (from `sample_raw_leads.json` and, later, anonymized real leads) with the expected
+qualification, score range and next action. Run it against the real model on every prompt, skill or model change,
+and track the pass rate over time. Scripted-LLM unit tests check the plumbing; the evaluation set checks the answers.
+
 ---
 
-# 76. Core Safety Rule
+# 77. Core Safety Rule
 
 Agents may:
 
@@ -2920,7 +3011,7 @@ Application executes.
 
 ---
 
-# 77. Product Differentiator
+# 78. Product Differentiator
 
 Do NOT try to compete by saying:
 
@@ -2955,9 +3046,24 @@ its own automation rules
 
 while running on the same reusable platform.
 
+Focus before breadth:
+
+```text
+one niche and one market first
+
+sell the outcome ("you do not lose leads"), measured on the dashboard
+
+per-business setup starts from an industry preset, so it does not cost a custom project per customer
+
+the first channel is the one the niche lives on (usually WhatsApp)
+```
+
+Competitors (HubSpot, GoHighLevel, Pipedrive, Zoho, Salesforce) already ship AI scoring, so scoring alone is not
+the product. Response speed and no lost leads in the customer's own channel are.
+
 ---
 
-# 78. Final Architecture
+# 79. Final Architecture
 
 ```text
                     BUSINESS INPUTS
@@ -2999,7 +3105,7 @@ while running on the same reusable platform.
 
 ---
 
-# 79. Instructions to Claude Code
+# 80. Instructions to Claude Code
 
 Build incrementally.
 
