@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     SUPABASE_JWKS_URL:           Optional[str] = Field(default=None,   description='Supabase Auth public keys, to verify user login tokens; defaults to <SUPABASE_PROJECT_URL>/auth/v1/.well-known/jwks.json')
     TEST_SUPABASE_URL:           Optional[str] = Field(default=None,   description='separate Supabase project wiped by pytest; never the app project')
     TEST_SUPABASE_SECRET_KEY:    Optional[str] = Field(default=None,   description='secret key of the TEST_SUPABASE_URL project')
+    TEST_SUPABASE_PUBLISHABLE_KEY: Optional[str] = Field(default=None, description='publishable key of the TEST_SUPABASE_URL project; pytest checks it cannot touch the tables')
     CORS_ORIGINS:                Annotated[list[str], NoDecode, BeforeValidator(_parse_origins)] = Field(default=['http://localhost:5173'], description='frontend origins allowed by CORS (JSON list or comma-separated)')
 
     @property

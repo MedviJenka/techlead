@@ -2478,7 +2478,8 @@ Activity model
 
 No AI yet.
 
-Status: done, except CI (GitHub Actions) and an automated test that the publishable key cannot read the tables.
+Status: done. CI runs in GitHub Actions (`.github/workflows/ci.yml`); `tests/platform/test_data_api_lockdown.py`
+checks that the publishable key cannot read or write the tables.
 
 ---
 

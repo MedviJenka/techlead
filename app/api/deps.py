@@ -1,7 +1,9 @@
 import uuid
 from typing import Annotated
+
 from fastapi import Depends
 from supabase import AsyncClient
+
 from app.core.auth import CurrentUser
 from app.core.supabase import get_supabase
 from app.repositories import BusinessRepository

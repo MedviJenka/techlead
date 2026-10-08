@@ -87,6 +87,13 @@ uv run ruff check app tests/platform && uv run mypy
 cd frontend && npm run build && npm run lint
 ```
 
+`tests/platform/test_data_api_lockdown.py` checks that the publishable key cannot read or write any table: always
+against `db/003_lock_down_data_api.sql`, and live against the test project when `TEST_SUPABASE_PUBLISHABLE_KEY` is set.
+
+CI (`.github/workflows/ci.yml`) runs the same checks plus `docker compose build` on every pull request and on pushes
+to `main` and `integration`. The database tests run there only when the repository secrets `TEST_SUPABASE_URL`,
+`TEST_SUPABASE_SECRET_KEY` and `TEST_SUPABASE_PUBLISHABLE_KEY` point at the separate test project.
+
 ## Phase 2: lead management
 
 Open a business to see its dashboard, then choose **View & import leads** and select
