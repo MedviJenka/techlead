@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -9,6 +10,8 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel
 from ai.guardrails import Guardrail
 from ai.schemas import BusinessProfile
+
+logger = logging.getLogger(__name__)
 
 
 class CrewExecutionError(RuntimeError):
@@ -78,6 +81,7 @@ class ContextualCrew:
             process=Process.sequential,
             verbose=self.context.verbose,
         )
+        logger.info("crew_run", extra={"business_id": self.business.id, "tasks": [task.name for task in tasks]})
         return crew.kickoff(inputs={**self.base_inputs(), **inputs})
 
     def base_inputs(self) -> dict[str, str]:
@@ -94,4 +98,5 @@ def task_result[M: BaseModel](output: CrewOutput, model: type[M]) -> M:
     for task_output in output.tasks_output:
         if isinstance(task_output.pydantic, model):
             return task_output.pydantic
+    logger.error("crew_output_missing", extra={"model": model.__name__})
     raise CrewExecutionError(f"Crew produced no {model.__name__}")

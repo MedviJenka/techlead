@@ -1,7 +1,5 @@
 import json
-
 from pydantic import BaseModel
-
 from ai.ports import NotFoundError
 from ai.schemas import LeadSearchFilter, LeadSnapshot
 from ai.tools.base import BusinessScopedTool, NoArguments

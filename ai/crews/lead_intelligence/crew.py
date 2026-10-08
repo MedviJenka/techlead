@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 
 from crewai import Agent, Crew, Process, Task
@@ -14,6 +15,8 @@ from ai.schemas import (
     QualificationResult,
 )
 from ai.schemas.lead import render_activities
+
+logger = logging.getLogger(__name__)
 
 
 class LeadIntelligenceResult(BaseModel):
@@ -60,13 +63,19 @@ class LeadIntelligenceCrew(ContextualCrew):
         return Crew(agents=self.agents, tasks=self.tasks, process=Process.sequential, verbose=self.context.verbose)
 
     def analyze(self, lead: LeadSnapshot, activities: Sequence[ActivitySnapshot] = ()) -> LeadIntelligenceResult:
+        logger.info("lead_intelligence_started", extra={"business_id": self.business.id, "lead_id": lead.id})
         output = self.crew().kickoff(inputs={
             **self.base_inputs(),
             "lead_json": lead.to_prompt_json(),
             "activities": render_activities(list(activities)),
         })
-        return LeadIntelligenceResult(
+        result = LeadIntelligenceResult(
             qualification=task_result(output, QualificationResult),
             ai_score=task_result(output, AIScoreResult),
             recommendation=task_result(output, NextActionRecommendation),
         )
+        logger.info(
+            "lead_intelligence_finished",
+            extra={"lead_id": lead.id, "token_usage": output.token_usage.model_dump()},
+        )
+        return result

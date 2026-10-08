@@ -1,10 +1,13 @@
 import os
+import pytest
 from datetime import UTC, datetime
 
-import pytest
 
 os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+
 os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+# Tests never ship logs to Logfire, even when .env holds a token.
+os.environ["LOGFIRE_TOKEN"] = ""
 
 from ai.data.sample_store import SAMPLE_BUSINESS, InMemoryLeadStore, load_sample_store
 from ai.factory import BusinessCrewFactory, SkillLibrary

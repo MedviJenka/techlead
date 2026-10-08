@@ -1,6 +1,5 @@
 """Who may see which business. Every signed-in user belongs to at most one business (a `users` row)."""
 
-import logging
 import uuid
 
 from postgrest.exceptions import APIError
@@ -8,13 +7,14 @@ from supabase import AsyncClient
 
 from app.core.auth import AuthUser
 from app.core.errors import ConflictError, NotFoundError, UnprocessableError
+from app.core.logging import Logger
 from app.models import Business
 from app.repositories import BusinessRepository, UserRepository
 from app.schemas import BusinessCreate
 from app.schemas.account import MeRead
 from app.services.business import UNIQUE_VIOLATION, BusinessService
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 OWNER_ROLE = "owner"
 
@@ -42,6 +42,7 @@ class AccountService:
         """404 (not 403) for another business, so its existence is not revealed."""
         member = await self.users.get(user.id)
         if member is None or not member.is_active or member.business_id != business_id:
+            logger.fire("business_access_denied", level="warning", user_id=str(user.id), business_id=str(business_id))
             raise NotFoundError(f"Business {business_id} not found")
 
     async def create_business(self, user: AuthUser, data: BusinessCreate) -> Business:
@@ -56,9 +57,16 @@ class AccountService:
             await self.users.add(owner | {"role": OWNER_ROLE})
         except Exception as exc:
             # Two requests, not one transaction: remove the business so no ownerless one is left behind.
+            logger.fire(
+                "business_owner_add_failed; rolling back",
+                level="warning",
+                _exc_info=exc,
+                business_id=str(business.id),
+                user_id=str(user.id),
+            )
             await self.business_repository.delete(business.id)
             if isinstance(exc, APIError) and exc.code == UNIQUE_VIOLATION:
                 raise _already_member() from exc  # lost a race with a concurrent create by the same user
             raise
-        logger.info("business_owner_added", extra={"business_id": str(business.id), "user_id": str(user.id)})
+        logger.fire("business_owner_added", business_id=str(business.id), user_id=str(user.id))
         return business

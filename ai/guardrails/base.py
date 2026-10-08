@@ -5,11 +5,14 @@ keeps them unit-testable without CrewAI. ``as_guardrail`` wraps one for ``Task(g
 violations are sent back to the agent, which retries up to ``guardrail_max_retries``.
 """
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from crewai import TaskOutput
 from pydantic import BaseModel, ValidationError
+
+logger = logging.getLogger(__name__)
 
 type Validator[M: BaseModel] = Callable[[M], list[str]]
 type Guardrail = Callable[[TaskOutput], tuple[bool, Any]]
@@ -27,9 +30,11 @@ def as_guardrail[M: BaseModel](model: type[M], *validators: Validator[M]) -> Gua
         try:
             result = extract_model(output, model)
         except ValidationError as error:
+            logger.warning("guardrail_invalid_output", extra={"model": model.__name__, "errors": error.error_count()})
             return False, f"Output must be valid JSON matching {model.__name__}: {error}"
         violations = [v for validator in validators for v in validator(result)]
         if violations:
+            logger.warning("guardrail_rejected", extra={"model": model.__name__, "violations": violations})
             return False, "Fix these problems and answer again:\n- " + "\n- ".join(violations)
         # With guardrails attached CrewAI leaves .pydantic unset for string answers; attach the parsed model.
         output.pydantic = result

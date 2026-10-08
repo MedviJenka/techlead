@@ -1,4 +1,3 @@
-import logging
 from typing import Any
 
 from fastapi import FastAPI, Request, status
@@ -6,7 +5,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-logger = logging.getLogger(__name__)
+from app.core.logging import Logger, LogLevel
+
+logger = Logger(__name__)
 
 
 class DomainError(Exception):
@@ -66,8 +67,13 @@ def _error_response(status_code: int, code: str, message: str, details: Any = No
     return JSONResponse(status_code=status_code, content={"error": error})
 
 
-async def _domain_error_handler(_: Request, exc: Exception) -> JSONResponse:
+async def _domain_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, DomainError)
+    level: LogLevel = "warning" if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR else "info"
+    logger.fire(
+        "domain_error", level=level, code=exc.code, status=exc.status_code, path=request.url.path,
+        method=request.method, error=exc.message,
+    )
     return _error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 
@@ -78,10 +84,11 @@ def _summarize(error: Any) -> str:
     return str(error["msg"])
 
 
-async def _validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
+async def _validation_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, RequestValidationError)
     errors = exc.errors()
     message = "; ".join(_summarize(err) for err in errors) or "Invalid request"
+    logger.fire("request_validation_failed", path=request.url.path, method=request.method, error=message)
     # Only loc/msg/type: `input` and `ctx` may echo client data or hold non-JSON values.
     details = [{"loc": list(err["loc"]), "msg": err["msg"], "type": err["type"]} for err in errors]
     return _error_response(status.HTTP_422_UNPROCESSABLE_CONTENT, "validation_error", message, details)
@@ -96,7 +103,7 @@ async def _http_error_handler(_: Request, exc: Exception) -> JSONResponse:
 
 
 async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("unhandled_error", extra={"path": request.url.path, "method": request.method})
+    logger.fire("unhandled_error", level="error", _exc_info=exc, path=request.url.path, method=request.method)
     return _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, "internal_error", "Internal server error")
 
 

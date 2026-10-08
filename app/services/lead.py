@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
@@ -15,6 +14,7 @@ from supabase import AsyncClient
 from ai.schemas.enums import ActivityType
 from app.analysis import AnalysisEngine, to_activity_snapshot, to_business_profile, to_lead_snapshot
 from app.core.errors import BadGatewayError, NotFoundError, UnprocessableError
+from app.core.logging import Logger
 from app.ingestion.adapters import AdaptedLead, JsonLeadAdapter, record_errors
 from app.intelligence import (
     Event,
@@ -45,7 +45,7 @@ from app.schemas.lead import (
 from app.schemas.lead_import import ImportEnvelope, ImportOutcome, ImportRecordResult, ImportResult
 from app.services.business import BusinessSettings, require_business
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 # PostgreSQL SQLSTATE class 23: integrity constraint violation (unique, check, foreign key, not null).
 _INTEGRITY_ERROR_CLASS = "23"
@@ -144,6 +144,9 @@ class LeadService:
         business = await self.business(business_id)
         lead = await self.get(business_id, lead_id)
         activities = await self.activities.all_for_lead(business_id, lead_id)
+        logger.fire(
+            "lead_analysis_started", business_id=str(business_id), lead_id=str(lead_id), activities=len(activities)
+        )
         try:
             result = await engine.analyze(
                 to_business_profile(business),
@@ -151,7 +154,9 @@ class LeadService:
                 [to_activity_snapshot(activity) for activity in activities],
             )
         except Exception as exc:
-            logger.exception("lead_analysis_failed", extra={"business_id": str(business_id), "lead_id": str(lead_id)})
+            logger.fire(
+                "lead_analysis_failed", level="error", _exc_info=exc, business_id=str(business_id), lead_id=str(lead_id)
+            )
             raise BadGatewayError("AI analysis failed; try again later") from exc
         metadata = {
             "ai_score": result.ai_score.overall_ai_score,
@@ -167,6 +172,15 @@ class LeadService:
         async with _business_locks[business_id]:
             current = await self.get(business_id, lead_id)
             saved = await self._apply(settings, current, values, extra=[analysis]) or current
+        logger.fire(
+            "lead_analysis_completed",
+            business_id=str(business_id),
+            lead_id=str(lead_id),
+            ai_score=result.ai_score.overall_ai_score,
+            qualified=result.qualification.qualified,
+            recommended_action=result.recommendation.action.value,
+            lead_score=saved.lead_score,
+        )
         return LeadAnalysis(
             lead=await self.read(saved),
             qualification=result.qualification,
@@ -177,7 +191,10 @@ class LeadService:
     async def create(self, business_id: uuid.UUID, data: LeadCreate) -> Lead:
         settings = await self.settings(business_id)
         async with _business_locks[business_id]:
-            lead, _ = await self._upsert(settings, business_id, data)
+            lead, outcome = await self._upsert(settings, business_id, data)
+        logger.fire(
+            "lead_saved", business_id=str(business_id), lead_id=str(lead.id), outcome=outcome.value, source=data.source
+        )
         return lead
 
     async def update(self, business_id: uuid.UUID, lead_id: uuid.UUID, data: LeadUpdate) -> Lead:
@@ -186,7 +203,14 @@ class LeadService:
         self._check_custom_fields(settings, values.get("custom_fields", {}))
         async with _business_locks[business_id]:
             lead = await self.get(business_id, lead_id)
-            return await self._apply(settings, lead, values) or lead
+            saved = await self._apply(settings, lead, values)
+        logger.fire(
+            "lead_updated" if saved else "lead_update_unchanged",
+            business_id=str(business_id),
+            lead_id=str(lead_id),
+            fields=sorted(values),
+        )
+        return saved or lead
 
     async def rescore(self, business_id: uuid.UUID) -> RescoreResult:
         """Recompute every lead's score and priority, e.g. after the scoring settings changed."""
@@ -202,10 +226,12 @@ class LeadService:
             for lead in leads:
                 if await self._apply(settings, lead, {}, _events(by_lead[lead.id])):
                     changed += 1
+        logger.fire("leads_rescored", business_id=str(business_id), total=len(leads), changed=changed)
         return RescoreResult(total=len(leads), changed=changed)
 
     def _check_custom_fields(self, settings: BusinessSettings, custom_fields: dict[str, Any]) -> None:
         if errors := custom_field_errors(settings.custom_fields, custom_fields):
+            logger.fire("custom_fields_invalid", level="warning", fields=sorted({str(e.loc[-1]) for e in errors}))
             raise InvalidCustomFields(errors)
 
     def _breakdown(self, settings: BusinessSettings, lead: Lead, events: Sequence[Event]) -> ScoreBreakdown:
@@ -345,8 +371,19 @@ class LeadService:
     async def import_batch(self, business_id: uuid.UUID, envelope: ImportEnvelope) -> ImportResult:
         """Each record is saved on its own (one transaction per record), so one bad record never undoes the rest."""
         settings = await self.settings(business_id)
+        logger.fire("lead_import_started", business_id=str(business_id), records=len(envelope.leads))
         async with _business_locks[business_id]:
-            return await self._import_records(settings, business_id, envelope)
+            result = await self._import_records(settings, business_id, envelope)
+        logger.fire(
+            "lead_import_completed",
+            level="warning" if result.failed else "info",
+            business_id=str(business_id),
+            created=result.created,
+            updated=result.updated,
+            skipped=result.skipped,
+            failed=result.failed,
+        )
+        return result
 
     async def _import_records(
         self, settings: BusinessSettings, business_id: uuid.UUID, envelope: ImportEnvelope
@@ -370,7 +407,15 @@ class LeadService:
                 result.errors = exc.errors
             except APIError as exc:
                 if not (exc.code or "").startswith(_INTEGRITY_ERROR_CLASS):
+                    logger.fire(
+                        "lead_import_record_db_error", level="error", _exc_info=exc, business_id=str(business_id),
+                        index=index,
+                    )
                     raise
+                logger.fire(
+                    "lead_import_record_integrity_error", level="warning", business_id=str(business_id), index=index,
+                    code=exc.code,
+                )
                 result.errors = [
                     RecordError(loc=[], msg="Record violates a database constraint", type="integrity_error")
                 ]
