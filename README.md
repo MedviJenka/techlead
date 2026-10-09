@@ -180,5 +180,5 @@ next-action agents, with their skills and guardrails) on that lead: `POST /busin
   then on; the priority stays rule-based (the AI's own priority is returned as advice only).
 - **Failures**: a provider error or a result the guardrails reject answers 502 and changes nothing.
 
-Run it once by hand with `python -m ai.demo lead_008` (sample data, real LLM calls).
+Run it once by hand with `python -m ai.crews.lead_intelligence lead_008` (sample data, real LLM calls).
 

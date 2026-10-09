@@ -3,14 +3,21 @@ from collections.abc import Sequence
 from crewai import Agent
 from crewai.project import CrewBase, agent
 
-from ai.crews.base import ContextualCrew, task_result
+from ai.crews.base import BusinessCrew
 from ai.guardrails import Guardrail, as_guardrail
 from ai.schemas import (
     LeadSearchFilter,
     LeadSnapshot,
+    ModelTier,
     PipelineMetrics,
     PipelineReview,
     SalesAssistantAnswer,
+)
+from ai.tools import (
+    GetBusinessConfigurationTool,
+    GetBusinessMetricsTool,
+    GetLeadActivitiesTool,
+    SearchBusinessLeadsTool,
 )
 from ai.tools.business_reader import summarize_leads
 
@@ -30,46 +37,53 @@ def known_leads_guardrail[M: (SalesAssistantAnswer, PipelineReview)](
 
 
 @CrewBase
-class ManagementCrew(ContextualCrew):
+class ManagementCrew(BusinessCrew):
     """Cross-lead reasoning for the AI sales assistant and daily pipeline review (MAIN_PLAN §24-25, §44).
 
-    The crew never queries data on its own initiative: the Flow turns the question into a filter
-    (interpret_question), runs the tenant-scoped search, then asks for an explanation.
+    The crew never queries data on its own initiative: SalesAssistantFlow (flow.py) turns the question
+    into a filter, runs the tenant-scoped search, then asks for an explanation.
     """
-
-    agents_config = "config/agents.yaml"
-    tasks_config = "config/tasks.yaml"
 
     @agent
     def business_query_agent(self) -> Agent:
-        return self.build_agent("business_query_agent")
+        return self.make_agent(
+            "business_query_agent",
+            tier=ModelTier.FAST,
+            tools=[GetBusinessConfigurationTool],
+            business_context=False,
+        )
 
     @agent
     def sales_manager_agent(self) -> Agent:
-        return self.build_agent("sales_manager_agent")
+        return self.make_agent(
+            "sales_manager_agent",
+            tier=ModelTier.REASONING,
+            tools=[SearchBusinessLeadsTool, GetLeadActivitiesTool, GetBusinessMetricsTool],
+            skills=["sales-reasoning", "churn-risk"],
+        )
 
     def interpret_question(self, question: str) -> LeadSearchFilter:
-        task = self.build_task("interpret_question_task", LeadSearchFilter)
-        output = self.run([self.business_query_agent()], [task], {"question": question})
-        return task_result(output, LeadSearchFilter)
+        return self.run_step(
+            self.business_query_agent(), "interpret_question_task", LeadSearchFilter, {"question": question}
+        )
 
     def explain_results(
         self, question: str, search: LeadSearchFilter, leads: Sequence[LeadSnapshot]
     ) -> SalesAssistantAnswer:
-        guardrail = known_leads_guardrail(SalesAssistantAnswer, leads)
-        task = self.build_task("explain_results_task", SalesAssistantAnswer, [guardrail])
-        output = self.run([self.sales_manager_agent()], [task], {
+        inputs = {
             "question": question,
             "search_filter": search.model_dump_json(exclude_defaults=True),
             "leads_json": summarize_leads(list(leads)) if leads else "[]",
-        })
-        return task_result(output, SalesAssistantAnswer)
+        }
+        guardrail = known_leads_guardrail(SalesAssistantAnswer, leads)
+        return self.run_step(
+            self.sales_manager_agent(), "explain_results_task", SalesAssistantAnswer, inputs, [guardrail]
+        )
 
     def review_pipeline(self, metrics: PipelineMetrics, attention_leads: Sequence[LeadSnapshot]) -> PipelineReview:
-        guardrail = known_leads_guardrail(PipelineReview, attention_leads)
-        task = self.build_task("review_pipeline_task", PipelineReview, [guardrail])
-        output = self.run([self.sales_manager_agent()], [task], {
+        inputs = {
             "metrics_json": metrics.model_dump_json(indent=1),
             "leads_json": summarize_leads(list(attention_leads)) if attention_leads else "[]",
-        })
-        return task_result(output, PipelineReview)
+        }
+        guardrail = known_leads_guardrail(PipelineReview, attention_leads)
+        return self.run_step(self.sales_manager_agent(), "review_pipeline_task", PipelineReview, inputs, [guardrail])

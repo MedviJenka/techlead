@@ -2639,8 +2639,11 @@ Test against sample leads.
 Verify structured output.
 
 Status: done. `POST .../leads/{lead_id}/analyze` runs the crew on demand and saves its summary, next action and
-AI score (an `ai_analysis` activity), blended into the deterministic score. Not done: a run against a real LLM in
-CI, and evaluation of answer quality on the sample leads.
+AI score (an `ai_analysis` activity), blended into the deterministic score. Answer quality is evaluated on the 10
+sample leads by `python -m ai.evals` (expected qualification, score band, allowed actions and priority per lead, plus
+hot-above-cold score ranking; passes at 80% of cases). It runs against the real model in CI (`llm-eval.yml`:
+nightly, manual, and on `ai/**` changes to integration; needs the `OPENAI_API_KEY` secret). First run on
+`openai/gpt-5.5`: 10/10, about 30k tokens and 9 LLM requests per lead.
 
 ---
 

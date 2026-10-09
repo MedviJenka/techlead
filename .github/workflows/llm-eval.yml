@@ -1,0 +1,56 @@
+name: LLM eval
+
+# Runs LeadIntelligenceCrew against the real model on the sample leads (python -m ai.evals).
+# Billed LLM calls, so it is kept out of the per-PR CI: nightly, by hand, and when the AI layer changes on integration.
+on:
+  workflow_dispatch:
+    inputs:
+      min_pass_rate:
+        description: Minimum share of cases that must pass
+        default: "0.8"
+  schedule:
+    - cron: "0 3 * * *"
+  push:
+    branches: [integration]
+    paths: ["ai/**", "docs/files/sample_raw_leads.json"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llm-eval
+  cancel-in-progress: true
+
+jobs:
+  lead-intelligence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Repo secret OPENAI_API_KEY; model from repo variable EVAL_OPENAI_MODEL.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.EVAL_OPENAI_MODEL || 'openai/gpt-5.5' }}
+      CREWAI_DISABLE_TELEMETRY: "true"
+      OTEL_SDK_DISABLED: "true"
+    steps:
+      - name: Require the API key
+        if: env.OPENAI_API_KEY == ''
+        run: |
+          echo "::warning::OPENAI_API_KEY secret is not set; skipping the LLM evaluation."
+      - uses: actions/checkout@v4
+        if: env.OPENAI_API_KEY != ''
+      - uses: astral-sh/setup-uv@v6
+        if: env.OPENAI_API_KEY != ''
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - if: env.OPENAI_API_KEY != ''
+        run: uv sync --frozen
+      - name: Evaluate
+        if: env.OPENAI_API_KEY != ''
+        run: uv run python -m ai.evals --min-pass-rate "${{ inputs.min_pass_rate || '0.8' }}" --json eval-report.json
+      - uses: actions/upload-artifact@v4
+        if: always() && env.OPENAI_API_KEY != ''
+        with:
+          name: llm-eval-report
+          path: eval-report.json
+          if-no-files-found: ignore

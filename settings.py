@@ -1,5 +1,6 @@
 import json
 from functools import cache
+from pathlib import Path
 from typing import Annotated, Any, Optional
 from pydantic import BeforeValidator, Field
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -17,14 +18,16 @@ def _parse_origins(value: Any) -> Any:
 
 class Settings(BaseSettings):
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(env_file=Path(__file__).parent / ".env", extra="allow")
 
     APP_ENV:                     str           = Field(default='dev',  description='')
     API_VERSION:                 str           = Field(default='v1',   description='version segment of the API prefix (/api/{API_VERSION})')
+    VERBOSE:                     bool          = Field(default=True,   description='crew ai agent verbose')
     GOOGLE_SHEETS:               Optional[str] = Field(default=None,   description='')
     OPENAI_MODEL:                str           = Field(...,            description='')
     AI_REASONING_MODEL:          Optional[str] = Field(default=None,   description='model for qualification/strategy agents; falls back to OPENAI_MODEL')
     AI_FAST_MODEL:               Optional[str] = Field(default=None,   description='model for extraction/classification agents; falls back to OPENAI_MODEL')
+    AI_TEMPERATURE:              Optional[float] = Field(default=None, description="sampling temperature for every agent; unset sends none (reasoning models such as gpt-5 reject anything but the default)")
     OPENAI_API_KEY:              Optional[str] = Field(default=None,   description='')
     LOGFIRE_TOKEN:               Optional[str] = Field(default=None,   description='')
     SUPABASE_PROJECT_URL:        Optional[str] = Field(default=None,   description='Supabase project URL (https://<ref>.supabase.co); the app database')
@@ -59,3 +62,6 @@ class Settings(BaseSettings):
 def get_config() -> Settings:
     """Load settings on first use so importing modules never requires a configured environment."""
     return Settings()
+
+
+Config = get_config()

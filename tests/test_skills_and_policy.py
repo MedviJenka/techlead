@@ -1,9 +1,25 @@
 import pytest
+from crewai import Agent
 
-from ai.factory import AGENT_POLICIES, InvalidConfigurationError, SkillLibrary
-from ai.factory.skills import SKILLS_ROOT
+from ai.crews import BusinessCrew, ConversationCrew, LeadIntelligenceCrew, ManagementCrew
+from ai.data.sample_store import InMemoryLeadStore
 from ai.schemas import AIConfiguration, BusinessProfile
+from ai.skill_library import SKILLS_ROOT, InvalidConfigurationError, SkillLibrary
 from ai.tools import BusinessScopedTool
+from tests.conftest import BUSINESS_ID, make_crew
+from tests.fakes import ScriptedLLM
+
+CREWS: tuple[type[BusinessCrew], ...] = (LeadIntelligenceCrew, ConversationCrew, ManagementCrew)
+
+
+def all_agents(store: InMemoryLeadStore, skills: SkillLibrary) -> dict[str, Agent]:
+    """Every @agent of every crew, built for the sample business: unknown skills raise here."""
+    agents: dict[str, Agent] = {}
+    for crew_class in CREWS:
+        crew = make_crew(crew_class, store, ScriptedLLM({}), skills)
+        for name in crew.__crew_metadata__["original_agents"]:  # type: ignore[attr-defined]
+            agents[name] = getattr(crew, name)()
+    return agents
 
 MVP_SKILLS = {"lead-qualification", "lead-scoring", "sales-reasoning", "conversation-analysis",
               "follow-up-strategy", "objection-handling", "churn-risk", "real-estate", "automotive", "insurance"}
@@ -15,10 +31,11 @@ def test_all_skills_load_with_instructions(skill_library: SkillLibrary) -> None:
         assert skill_library.get(name).instructions
 
 
-def test_every_policy_skill_exists(skill_library: SkillLibrary) -> None:
-    for policy in AGENT_POLICIES.values():
-        for name in policy.skills:
-            skill_library.get(name)
+def test_every_agent_builds_and_has_prompts(store: InMemoryLeadStore, skill_library: SkillLibrary) -> None:
+    agents = all_agents(store, skill_library)
+    assert len(agents) == 7
+    for name, agent in agents.items():
+        assert agent.role and agent.goal, name
 
 
 def test_compose_adds_industry_and_business_skills(skill_library: SkillLibrary) -> None:
@@ -51,8 +68,11 @@ def test_business_skills_are_not_shared_skills(skill_library: SkillLibrary) -> N
     assert (SKILLS_ROOT / "businesses" / "techlead" / "SKILL.md").is_file()
 
 
-def test_agents_only_get_read_only_business_scoped_tools() -> None:
-    for name, policy in AGENT_POLICIES.items():
-        for tool in policy.tools:
-            assert issubclass(tool, BusinessScopedTool), name
-            assert not tool.__name__.startswith(("Update", "Send", "Delete", "Create")), name
+def test_agents_only_get_read_only_business_scoped_tools(
+    store: InMemoryLeadStore, skill_library: SkillLibrary
+) -> None:
+    for name, agent in all_agents(store, skill_library).items():
+        for tool in agent.tools or []:
+            assert isinstance(tool, BusinessScopedTool), name
+            assert tool.business_id == BUSINESS_ID, name
+            assert not type(tool).__name__.startswith(("Update", "Send", "Delete", "Create")), name
