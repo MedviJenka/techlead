@@ -1,9 +1,10 @@
-import logging
 from collections.abc import Sequence
+
 from crewai import Agent, Crew, Task
 from crewai.project import CrewBase, agent, crew, task
 from crewai.types.usage_metrics import UsageMetrics
 from pydantic import BaseModel
+
 from ai.crews.base import BusinessCrew, task_result
 from ai.guardrails import make_action_guardrail, qualification_guardrail, scoring_guardrail
 from ai.schemas import (
@@ -16,8 +17,9 @@ from ai.schemas import (
 )
 from ai.schemas.lead import render_activities
 from ai.tools import GetBusinessConfigurationTool, GetLeadActivitiesTool, GetLeadTool
+from app.core.logger import Logger
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 
 class LeadIntelligenceResult(BaseModel):
@@ -77,19 +79,19 @@ class LeadIntelligenceCrew(BusinessCrew):
         return self.sequential_crew()
 
     def analyze(self, lead: LeadSnapshot, activities: Sequence[ActivitySnapshot] = ()) -> LeadIntelligenceResult:
-        logger.info("lead_intelligence_started", extra={"business_id": self.business.id, "lead_id": lead.id})
-        output = self.kickoff(self.crew(), {
-            "lead_json": lead.to_prompt_json(),
-            "activities": render_activities(list(activities)),
-        })
+        logger.fire("lead_intelligence_started", business_id=self.business.id, lead_id=lead.id)
+        output = self.kickoff(
+            self.crew(),
+            {
+                "lead_json": lead.to_prompt_json(),
+                "activities": render_activities(list(activities)),
+            },
+        )
         result = LeadIntelligenceResult(
             qualification=task_result(output, QualificationResult),
             ai_score=task_result(output, AIScoreResult),
             recommendation=task_result(output, NextActionRecommendation),
             usage=output.token_usage,
         )
-        logger.info(
-            "lead_intelligence_finished",
-            extra={"lead_id": lead.id, "token_usage": output.token_usage.model_dump()},
-        )
+        logger.fire("lead_intelligence_finished", lead_id=lead.id, token_usage=output.token_usage.model_dump())
         return result
