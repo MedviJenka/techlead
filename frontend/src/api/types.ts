@@ -11,7 +11,6 @@ export type AIConfiguration = {
   autonomy_level: number
   allowed_actions: string[]
   approval_required_actions: string[]
-  extra_skills: string[]
   instructions: string | null
 }
 
@@ -106,9 +105,26 @@ export type ScoreBreakdown = {
   matched: { id: string; label: string; points: number }[]
 }
 export type RescoreResult = { total: number; changed: number }
-// POST /leads/{id}/analyze (app/schemas/analysis.py). The recommendation is advice; its priority is the AI's view.
-export type LeadAnalysis = {
-  lead: LeadDetail
+// POST /leads/{id}/analyze queues a job (app/schemas/analysis.py); pending/running is "analysis pending".
+export type AnalysisJobStatus = 'pending' | 'running' | 'succeeded' | 'failed'
+export type AnalysisJob = {
+  id: string
+  lead_id: string
+  trigger: 'lead_created' | 'manual'
+  status: AnalysisJobStatus
+  attempts: number
+  max_attempts: number
+  run_after: string
+  last_error: string | null
+  cost_usd: string | null
+  created_at: string
+  finished_at: string | null
+}
+// GET /leads/{id}/analysis: the latest job and the latest saved analysis.
+export type LeadAnalysisState = { job: AnalysisJob | null; result: SavedAnalysis | null }
+// The AI's saved analysis. The recommendation is advice; its priority is the AI's view.
+export type SavedAnalysis = {
+  analysed_at: string
   qualification: {
     qualified: boolean
     confidence: number

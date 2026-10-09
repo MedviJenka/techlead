@@ -2690,6 +2690,15 @@ The flow runs automatically when a lead is saved (as a background job), not only
 
 Done when: the AI evaluation set (see Testing) passes against the real model, and cost per lead is recorded.
 
+Status: done. Prerequisites: `analysis_jobs` queue with `claim_analysis_job` (SKIP LOCKED, leases, retry with
+exponential backoff) and the worker `python -m app.worker` in its own image (the API image has no CrewAI); a
+per-business lease in `business_locks` replaces the in-process lock; `save_lead` writes a lead, its activities and
+its analysis job in one transaction (db/004_functions.sql). `NewLeadFlow` (`app/analysis/flow.py`) runs on every new
+lead (per-business `ai_configuration.auto_analyze`, default on) and on `POST /analyze` (202 + job, polled through
+`GET /analysis`). Token usage and, when `AI_PRICE_*_PER_MTOK` are set, dollars are stored per run on the job and the
+`ai_analysis` activity. The priority route (hot / warm / cold) is computed and logged; Phase 7 attaches actions to
+it. Real-model eval (`llm-eval.yml`, run 37957023043, 2026-10-09): 10/10 cases passed, ~42.7k tokens per lead.
+
 ---
 
 # 66. Phase 7 — First Channel End to End

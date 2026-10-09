@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field, computed_field
 
 from ai.crews.lead_intelligence.crew import LeadIntelligenceCrew, LeadIntelligenceResult
 from ai.data.sample_store import InMemoryLeadStore
-from ai.evals.cases import PRIORITY_ORDER, RANKING, EvalCase
+from ai.evals.cases import RANKING, EvalCase
+from ai.schemas import Priority
 from app.core.logger import Logger
 
 logger = Logger(__name__)
@@ -91,15 +92,15 @@ def check_case(case: EvalCase, result: LeadIntelligenceResult) -> list[str]:
     if case.actions is not None and rec.action not in case.actions:
         expected = ", ".join(sorted(action.value for action in case.actions))
         failures.append(f"action={rec.action.value}, expected one of: {expected}")
-    rank = PRIORITY_ORDER.index(rec.priority)
-    if not PRIORITY_ORDER.index(case.min_priority) <= rank <= PRIORITY_ORDER.index(case.max_priority):
+    order = list(Priority)  # declared from LOW to CRITICAL
+    if not order.index(case.min_priority) <= order.index(rec.priority) <= order.index(case.max_priority):
         failures.append(f"priority={rec.priority.value}, expected {case.min_priority.value}-{case.max_priority.value}")
     return failures
 
 
-def check_ranking(scores: Mapping[str, int], ranking: tuple[frozenset[str], frozenset[str]] = RANKING) -> list[str]:
+def check_ranking(scores: Mapping[str, int]) -> list[str]:
     """Every scored lead in the higher group must outscore every scored lead in the lower group."""
-    higher, lower = ranking
+    higher, lower = RANKING
     return [
         f"{hot} scored {scores[hot]}, not above {cold} ({scores[cold]})"
         for hot in sorted(higher & scores.keys())
@@ -129,23 +130,11 @@ def run_lead_intelligence_eval(
         started = time.perf_counter()
         try:
             result = crew.analyze(lead, store.list_activities(business_id, case.lead_id))
+            outcome = CaseResult(lead_id=case.lead_id, failures=check_case(case, result), result=result)
         except Exception as exc:  # timeouts, malformed output, exhausted guardrail retries: all a failed case
             logger.fire("eval_case_error", level="warning", lead_id=case.lead_id, error=repr(exc))
-            results.append(
-                CaseResult(
-                    lead_id=case.lead_id,
-                    error=f"{type(exc).__name__}: {exc}",
-                    elapsed_s=round(time.perf_counter() - started, 1),
-                )
-            )
-            continue
-        results.append(
-            CaseResult(
-                lead_id=case.lead_id,
-                failures=check_case(case, result),
-                result=result,
-                elapsed_s=round(time.perf_counter() - started, 1),
-            )
-        )
+            outcome = CaseResult(lead_id=case.lead_id, error=f"{type(exc).__name__}: {exc}")
+        outcome.elapsed_s = round(time.perf_counter() - started, 1)
+        results.append(outcome)
     scores = {case.lead_id: case.result.ai_score.overall_ai_score for case in results if case.result is not None}
     return EvalReport(model=model, cases=results, ranking_failures=check_ranking(scores), min_pass_rate=min_pass_rate)

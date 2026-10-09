@@ -17,7 +17,6 @@ from ai.crews import AIRuntime, LeadIntelligenceCrew
 from ai.data.sample_store import SAMPLE_BUSINESS, load_sample_store
 from ai.evals.cases import LEAD_INTELLIGENCE_CASES
 from ai.evals.runner import run_lead_intelligence_eval
-from ai.skill_library import SkillLibrary
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,10 +36,9 @@ def main(argv: list[str] | None = None) -> int:
     if settings.fast_model != settings.reasoning_model:
         model = f"{settings.reasoning_model} (reasoning) / {settings.fast_model} (fast)"
     store = load_sample_store()
-    skills = SkillLibrary()
     report = run_lead_intelligence_eval(
         store,
-        lambda: LeadIntelligenceCrew.for_business(AIRuntime(store, settings.resolver(), skills), SAMPLE_BUSINESS.id),
+        lambda: LeadIntelligenceCrew.for_business(AIRuntime(store, settings.resolver()), SAMPLE_BUSINESS.id),
         SAMPLE_BUSINESS.id,
         cases,
         model=model,

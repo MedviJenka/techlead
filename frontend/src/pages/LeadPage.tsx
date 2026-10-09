@@ -2,7 +2,7 @@ import { motion } from 'motion/react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 
-import { useActivities, useAnalyze, useLead, useLeadMutation, useScore } from '../api/leads'
+import { useActivities, useAnalysisState, useAnalyze, useLead, useLeadMutation, useScore } from '../api/leads'
 import type { LeadDetail } from '../api/types'
 import { Pagination } from '../components/Leads'
 import { daysSince, dueLabel, FOLLOW_UP_REASON, inputClass, leadName, relativeTime, titleCase } from '../components/leadDisplay'
@@ -101,7 +101,11 @@ function Signals({ title, items, tone }: { title: string; items: string[]; tone:
 
 function Analysis({ businessId, lead }: { businessId: string; lead: LeadDetail }) {
   const analyze = useAnalyze(businessId, lead.id)
-  const result = analyze.data
+  const state = useAnalysisState(businessId, lead.id)
+  const job = state.data?.job
+  const result = state.data?.result
+  const working = analyze.isPending || job?.status === 'pending' || job?.status === 'running'
+  const failed = job?.status === 'failed' && !working
   const hasAnalysis = Boolean(result || lead.ai_summary || lead.recommended_action || lead.sentiment)
   return (
     <AiCard
@@ -111,11 +115,11 @@ function Analysis({ businessId, lead }: { businessId: string; lead: LeadDetail }
           type="button"
           variant="ai"
           size="sm"
-          icon={analyze.isPending ? 'progress_activity' : 'auto_awesome'}
-          disabled={analyze.isPending}
-          onClick={() => analyze.mutate({})}
+          icon={working ? 'progress_activity' : 'auto_awesome'}
+          disabled={working}
+          onClick={() => analyze.mutate({}, { onSuccess: () => void state.refetch() })}
         >
-          {analyze.isPending ? 'Analyzing…' : hasAnalysis ? 'Analyze again' : 'Analyze with AI'}
+          {working ? (job?.status === 'running' ? 'Analyzing…' : 'Queued…') : hasAnalysis ? 'Analyze again' : 'Analyze with AI'}
         </Button>
       }
       why={
@@ -126,7 +130,14 @@ function Analysis({ businessId, lead }: { businessId: string; lead: LeadDetail }
       }
     >
       {analyze.isError && <ErrorState message={analyze.error.message} />}
-      {!hasAnalysis && !analyze.isError && <p className="text-ink-muted">No analysis yet. It takes a few seconds and uses your AI provider.</p>}
+      {failed && <ErrorState message={`AI analysis failed after ${job.attempts} attempts. Try again later.`} />}
+      {working && job && job.attempts > 0 && job.last_error && (
+        <p className="mb-2 text-[13px] text-warning">Retrying (attempt {job.attempts + 1} of {job.max_attempts})…</p>
+      )}
+      {!hasAnalysis && !analyze.isError && !working && (
+        <p className="text-ink-muted">No analysis yet. New leads are analysed automatically; it uses your AI provider.</p>
+      )}
+      {!hasAnalysis && working && <p className="text-ink-muted">The AI is reading this lead. This usually takes under a minute.</p>}
       {(result?.qualification.summary ?? lead.ai_summary) && <p className="leading-relaxed">{result?.qualification.summary ?? lead.ai_summary}</p>}
       {result && (
         <div className="mt-3 flex flex-wrap gap-1.5 font-mono text-[11px]">

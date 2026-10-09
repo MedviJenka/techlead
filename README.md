@@ -33,9 +33,10 @@ Create the tables by pasting the files in `db/` into the Supabase SQL editor, in
 
 | File | What |
 |---|---|
-| `001_core_tables.sql` | `businesses`, `leads`, `activities` |
+| `001_core_tables.sql` | `businesses`, `leads`, `activities`, `analysis_jobs`, `business_locks` |
 | `002_users.sql` | `users` (app profile; `id` is the Supabase Auth user id) |
 | `003_lock_down_data_api.sql` | RLS on, publishable key gets no access, secret key (`service_role`) gets full access |
+| `004_functions.sql` | `save_lead` (lead + activities + job in one transaction), the AI job queue, the per-business lock |
 
 Every file is safe to run again. To change the schema, edit or add a file in `db/`, run it in the SQL editor, and
 update the matching row model in `app/models/`. A new table also goes into `003_lock_down_data_api.sql`.
@@ -72,6 +73,7 @@ Ports are bound to `127.0.0.1` only.
 ```sh
 uv sync
 uv run uvicorn app.main:app --reload
+uv run python -m app.worker          # AI worker: runs queued analyses (real LLM calls)
 cd frontend && npm install && npm run dev
 ```
 
@@ -165,20 +167,32 @@ history explains itself. Time-based rules (days since contact) move only on the 
 | POST | `/businesses/{business_id}/leads/rescore` | Recompute every lead's score and priority |
 | GET | `/businesses/{business_id}/leads/{lead_id}/score` | Live score breakdown (matched rules, AI blend) |
 
-## AI analysis (CrewAI bridge)
+## AI analysis (NewLeadFlow, background worker)
 
-On a lead page, **Analyze with AI** runs the `LeadIntelligenceCrew` from `ai/` (qualification, AI scoring and
-next-action agents, with their skills and guardrails) on that lead: `POST /businesses/{business_id}/leads/{lead_id}/analyze`.
+AI never runs inside an API request. Saving a **new** lead (create or import) queues an analysis job in the same
+database transaction; **Analyze with AI** on a lead page queues one too:
+`POST /businesses/{business_id}/leads/{lead_id}/analyze` answers `202` with the job at once. The frontend polls
+`GET .../leads/{lead_id}/analysis` (the latest job and the latest saved result) until the job finishes.
 
-- **Cost**: each analysis makes several real LLM calls with `OPENAI_MODEL` / `AI_REASONING_MODEL` and takes
-  seconds. Without `OPENAI_API_KEY` (for OpenAI models) the endpoint answers 503; other routes are unaffected.
-  Nothing runs automatically yet.
+The worker (`python -m app.worker`, the `worker` Compose service) claims due jobs and runs `NewLeadFlow`
+(`app/analysis/flow.py`): the `LeadIntelligenceCrew` (qualification, AI scoring, next action), then the deterministic
+score, the blended final score and priority, and a priority route (hot / warm / cold).
+
+- **Cost**: each run makes several real LLM calls with `OPENAI_MODEL` / `AI_REASONING_MODEL`. Every new lead is
+  analysed unless the business sets `ai_configuration.auto_analyze` to `false`. Token counts are stored on the job and
+  in the `ai_analysis` activity; set `AI_PRICE_INPUT_PER_MTOK` and `AI_PRICE_OUTPUT_PER_MTOK` to also store dollars.
+- **Images**: the API image has no CrewAI (`uv sync --no-default-groups`); the worker image adds the `ai` dependency
+  group. Run as many workers as you like: jobs are claimed with `FOR UPDATE SKIP LOCKED`.
+- **Failures**: a failed run is retried with exponential backoff (30 s doubling, up to 5 attempts) and never changes
+  the lead. A worker that dies mid-run leaves its job leased; another worker takes it over when the lease expires.
+  The worker refuses to start without `OPENAI_API_KEY` (for OpenAI models).
 - **Isolation**: the crew's tools read a snapshot of that one lead, its activities and its business
   (`app/analysis/read_service.py`), loaded before the crew starts. An agent cannot reach another lead or tenant.
 - **What is saved**: the qualification summary (`ai_summary`), the recommended action (`recommended_action`) and an
-  `ai_analysis` activity holding the full result. Its AI score replaces the imported one in the score blend from
-  then on; the priority stays rule-based (the AI's own priority is returned as advice only).
-- **Failures**: a provider error or a result the guardrails reject answers 502 and changes nothing.
+  `ai_analysis` activity holding the full result and its cost. Its AI score replaces the imported one in the score
+  blend from then on; the priority stays rule-based (the AI's own priority is advice only).
+- **Concurrency**: lead writes take a per-business lease in the database (`business_locks`), so any number of API
+  and worker processes can write safely; a lead and its activities are saved in one transaction (`save_lead`).
 
 Run it once by hand with `python -m ai.crews.lead_intelligence lead_008` (sample data, real LLM calls).
 

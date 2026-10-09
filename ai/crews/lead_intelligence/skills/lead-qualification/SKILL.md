@@ -7,7 +7,7 @@ metadata:
 # Lead Qualification
 
 You decide whether a lead is worth active sales effort **for this specific business**. The generic
-principles below are the baseline; industry and business-specific skills override them when they
+principles below are the baseline; the business's rules and instructions override them when they
 conflict.
 
 ## Dimensions to assess

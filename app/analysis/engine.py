@@ -5,18 +5,29 @@ CrewAI is imported lazily: the API starts, and every other route works, without 
 
 import asyncio
 import time
-from functools import cache
 from typing import TYPE_CHECKING, Protocol
 
 from ai.schemas import ActivitySnapshot, BusinessProfile, LeadSnapshot
 from app.core.logger import Logger
+from settings import Settings
 
 if TYPE_CHECKING:
     from ai.config import LLMResolver
     from ai.crews.lead_intelligence.crew import LeadIntelligenceResult
-    from ai.skill_library import SkillLibrary
 
 logger = Logger(__name__)
+
+
+def reasoning_model(config: Settings) -> str:
+    return config.AI_REASONING_MODEL or config.OPENAI_MODEL
+
+
+def missing_ai_configuration(config: Settings) -> str | None:
+    """Why the crew cannot run here, or None. OpenAI models (the default provider) need ``OPENAI_API_KEY``."""
+    model = reasoning_model(config)
+    if (model.startswith("openai/") or "/" not in model) and not config.OPENAI_API_KEY:
+        return "AI analysis is not configured: set OPENAI_API_KEY"
+    return None
 
 
 class AnalysisEngine(Protocol):
@@ -24,13 +35,6 @@ class AnalysisEngine(Protocol):
     async def analyze(
         self, business: BusinessProfile, lead: LeadSnapshot, activities: list[ActivitySnapshot]
     ) -> "LeadIntelligenceResult": ...
-
-
-@cache
-def _skills() -> "SkillLibrary":
-    from ai.skill_library import SkillLibrary
-
-    return SkillLibrary()  # reads every SKILL.md once per process
 
 
 class CrewAnalysisEngine:
@@ -50,9 +54,9 @@ class CrewAnalysisEngine:
 
         service = SingleLeadReadService(business, lead, activities)
         if self._llm_resolver is None:
-            runtime = AIRuntime.from_env(service, _skills())
+            runtime = AIRuntime.from_env(service)
         else:
-            runtime = AIRuntime(service, self._llm_resolver, _skills())
+            runtime = AIRuntime(service, self._llm_resolver)
         crew = LeadIntelligenceCrew(business, runtime)
         logger.fire("crew_kickoff", business_id=business.id, lead_id=lead.id, activities=len(activities))
         started = time.perf_counter()

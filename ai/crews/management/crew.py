@@ -50,7 +50,6 @@ class ManagementCrew(BusinessCrew):
             "business_query_agent",
             tier=ModelTier.FAST,
             tools=[GetBusinessConfigurationTool],
-            business_context=False,
         )
 
     @agent
@@ -59,7 +58,6 @@ class ManagementCrew(BusinessCrew):
             "sales_manager_agent",
             tier=ModelTier.REASONING,
             tools=[SearchBusinessLeadsTool, GetLeadActivitiesTool, GetBusinessMetricsTool],
-            skills=["sales-reasoning", "churn-risk"],
         )
 
     def interpret_question(self, question: str) -> LeadSearchFilter:

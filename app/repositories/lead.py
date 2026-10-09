@@ -1,18 +1,20 @@
 import uuid
-from datetime import UTC, datetime
 from typing import Any, cast
 
 from postgrest import CountMethod
+from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
 from app.core.supabase import to_json
-from app.models import Lead
+from app.models import AnalysisTrigger, Lead
 from app.schemas.lead import LeadListParams, LeadSummary
 
 # List views select only these columns: they never load (or leak) `raw_payload`.
 _SUMMARY_COLUMNS = ",".join(LeadSummary.model_fields)
 # PostgREST caps each response at this many rows (Supabase default).
 _MAX_ROWS = 1000
+# Raised by save_lead when the lead to update does not exist.
+_NO_DATA_FOUND = "P0002"
 _SEARCH_COLUMNS = ("first_name", "last_name", "email", "phone", "company_name")
 
 
@@ -56,29 +58,28 @@ class LeadRepository:
         lead_id: uuid.UUID | None,
         values: dict[str, Any],
         activities: list[dict[str, Any]],
+        analysis_trigger: AnalysisTrigger | None = None,
     ) -> Lead:
-        """Insert (``lead_id=None``) or update a lead, then append ``activities`` to it.
+        """Insert (``lead_id=None``) or update a lead and append ``activities`` to it, in one transaction.
 
-        Two requests, not one transaction: if the activity insert fails, the lead change is kept without its events.
+        ``analysis_trigger`` also enqueues the lead's AI analysis in that transaction (``save_lead`` in
+        db/004_functions.sql), so a saved lead always has its history and, when asked, its job.
         """
-        leads = self._db.table("leads")
-        if lead_id is None:
-            query = leads.insert(to_json(values | {"business_id": business_id}))
-        else:
-            changes = to_json(values | {"updated_at": datetime.now(UTC)})
-            query = leads.update(changes).eq("business_id", str(business_id)).eq("id", str(lead_id))
-        response = await query.execute()
-        if not response.data:
-            raise LookupError(f"Lead {lead_id} not found")
-        lead = Lead.model_validate(response.data[0])
-        if activities:
-            # A bulk insert needs the same keys in every row.
-            rows = [
-                {"business_id": business_id, "lead_id": lead.id, "channel": None, "metadata": {}} | a
-                for a in activities
-            ]
-            await self._db.table("activities").insert(to_json(rows)).execute()
-        return lead
+        rows = [{"channel": None, "metadata": {}} | activity for activity in activities]
+        params = {
+            "p_business_id": business_id,
+            "p_lead_id": lead_id,
+            "p_values": values,
+            "p_activities": rows,
+            "p_analysis_trigger": analysis_trigger,
+        }
+        try:
+            response = await self._db.rpc("save_lead", to_json(params)).execute()
+        except APIError as exc:
+            if exc.code == _NO_DATA_FOUND:
+                raise LookupError(f"Lead {lead_id} not found") from exc
+            raise
+        return Lead.model_validate(response.data)
 
     async def list_all(self, business_id: uuid.UUID) -> list[LeadSummary]:
         """Every lead of the business (summary columns), fetched in pages of PostgREST's default row limit."""

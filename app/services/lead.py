@@ -10,8 +10,8 @@ from pydantic import ValidationError
 from supabase import AsyncClient
 
 from ai.schemas.enums import ActivityType
-from app.analysis import AnalysisEngine, to_activity_snapshot, to_business_profile, to_lead_snapshot
-from app.core.errors import BadGatewayError, NotFoundError, UnprocessableError
+from app.core.errors import NotFoundError, UnprocessableError
+from app.core.locks import BusinessLock, DatabaseBusinessLock
 from app.core.logger import Logger
 from app.ingestion.adapters import AdaptedLead, JsonLeadAdapter, record_errors
 from app.intelligence import (
@@ -24,12 +24,13 @@ from app.intelligence import (
     priority_for,
     score_lead,
 )
-from app.models import Activity, Business, Lead
+from app.models import Activity, AnalysisJob, AnalysisTrigger, Business, Lead
 from app.repositories.activity import ActivityRepository
+from app.repositories.analysis_job import AnalysisJobRepository
 from app.repositories.business import BusinessRepository
 from app.repositories.lead import LeadRepository
 from app.schemas.activity import ActivityRead
-from app.schemas.analysis import LeadAnalysis
+from app.schemas.analysis import AnalysisJobRead, AnalysisResult, LeadAnalysisState, RunCost, SavedAnalysis
 from app.schemas.common import Page, RecordError
 from app.schemas.lead import (
     LeadCreate,
@@ -47,10 +48,6 @@ logger = Logger(__name__)
 
 # PostgreSQL SQLSTATE class 23: integrity constraint violation (unique, check, foreign key, not null).
 _INTEGRITY_ERROR_CLASS = "23"
-
-# Serializes lead writes per business (match-then-save deduplication must not interleave). In-process only: run
-# a single backend process, or move matching into the database before scaling out.
-_business_locks: defaultdict[uuid.UUID, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 # Derived by the service on every write; never taken from client or import input.
 _DERIVED_FIELDS = frozenset({"lead_score"})
@@ -88,6 +85,9 @@ class LeadService:
         self.leads = LeadRepository(db)
         self.businesses = BusinessRepository(db)
         self.activities = ActivityRepository(db)
+        self.jobs = AnalysisJobRepository(db)
+        # Serializes lead writes per business across processes (match-then-save deduplication must not interleave).
+        self.lock: BusinessLock = DatabaseBusinessLock(db)
         self.now = now
         self._businesses: dict[uuid.UUID, Business] = {}
 
@@ -134,29 +134,44 @@ class LeadService:
         activities = await self.activities.all_for_lead(business_id, lead_id)
         return self._breakdown(await self.settings(business_id), lead, _events(activities))
 
-    async def analyze(self, business_id: uuid.UUID, lead_id: uuid.UUID, engine: AnalysisEngine) -> LeadAnalysis:
-        """Run the AI crew on the lead, then save its summary, next action and AI score (blended into the score).
+    async def request_analysis(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> AnalysisJob:
+        """Queue the lead's AI analysis for the worker (MAIN_PLAN §58: AI never runs inside a request).
 
-        The crew runs outside the business lock (it takes seconds); the result is applied to the lead as it is then.
+        Returns the lead's open job: asking again while one is pending or running does not queue a second run.
         """
+        await self.get(business_id, lead_id)
+        job = await self.jobs.enqueue(business_id, lead_id, AnalysisTrigger.MANUAL)
+        logger.fire(
+            "lead_analysis_requested", business_id=str(business_id), lead_id=str(lead_id), job_id=str(job.id),
+            status=job.status.value,
+        )
+        return job
+
+    async def analysis_state(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> LeadAnalysisState:
+        """The lead's latest job and the latest analysis the AI saved (they differ while a new run is open)."""
+        await self.get(business_id, lead_id)
+        job = await self.jobs.latest_for_lead(business_id, lead_id)
+        latest = await self.activities.latest_of_type(business_id, lead_id, ActivityType.AI_ANALYSIS)
+        return LeadAnalysisState(
+            job=AnalysisJobRead.model_validate(job.model_dump()) if job else None,
+            result=SavedAnalysis.from_activity(latest) if latest else None,
+        )
+
+    async def analysis_inputs(
+        self, business_id: uuid.UUID, lead_id: uuid.UUID
+    ) -> tuple[Business, Lead, Sequence[Activity]]:
+        """What the AI reads about the lead: its business, the lead and its timeline."""
         business = await self.business(business_id)
         lead = await self.get(business_id, lead_id)
-        activities = await self.activities.all_for_lead(business_id, lead_id)
-        logger.fire(
-            "lead_analysis_started", business_id=str(business_id), lead_id=str(lead_id), activities=len(activities)
-        )
-        try:
-            result = await engine.analyze(
-                to_business_profile(business),
-                to_lead_snapshot(lead, activities),
-                [to_activity_snapshot(activity) for activity in activities],
-            )
-        except Exception as exc:
-            logger.fire(
-                "lead_analysis_failed", level="error", _exc_info=exc, business_id=str(business_id), lead_id=str(lead_id)
-            )
-            raise BadGatewayError("AI analysis failed; try again later") from exc
-        metadata = {
+        return business, lead, await self.activities.all_for_lead(business_id, lead_id)
+
+    async def record_analysis(
+        self, business_id: uuid.UUID, lead_id: uuid.UUID, result: AnalysisResult, cost: RunCost | None = None
+    ) -> Lead:
+        """Save the AI's summary, next action and score (blended into the deterministic score) with an
+        ``ai_analysis`` activity. Applied to the lead as it is now: the AI ran outside the business lock.
+        """
+        metadata: dict[str, Any] = {
             "ai_score": result.ai_score.overall_ai_score,
             "qualified": result.qualification.qualified,
             "recommended_action": result.recommendation.action.value,
@@ -164,31 +179,29 @@ class LeadService:
             "score": result.ai_score.model_dump(mode="json"),
             "recommendation": result.recommendation.model_dump(mode="json"),
         }
+        if cost is not None:
+            metadata["cost"] = cost.as_metadata()
         analysis = _activity(ActivityType.AI_ANALYSIS, "AI analysis", metadata)
         values = {"ai_summary": result.qualification.summary, "recommended_action": result.recommendation.action.value}
         settings = await self.settings(business_id)
-        async with _business_locks[business_id]:
+        async with self.lock.hold(business_id):
             current = await self.get(business_id, lead_id)
             saved = await self._apply(settings, current, values, extra=[analysis]) or current
         logger.fire(
-            "lead_analysis_completed",
+            "lead_analysis_recorded",
             business_id=str(business_id),
             lead_id=str(lead_id),
             ai_score=result.ai_score.overall_ai_score,
             qualified=result.qualification.qualified,
             recommended_action=result.recommendation.action.value,
             lead_score=saved.lead_score,
+            priority=saved.priority,
         )
-        return LeadAnalysis(
-            lead=await self.read(saved),
-            qualification=result.qualification,
-            ai_score=result.ai_score,
-            recommendation=result.recommendation,
-        )
+        return saved
 
     async def create(self, business_id: uuid.UUID, data: LeadCreate) -> Lead:
         settings = await self.settings(business_id)
-        async with _business_locks[business_id]:
+        async with self.lock.hold(business_id):
             lead, outcome = await self._upsert(settings, business_id, data)
         logger.fire(
             "lead_saved", business_id=str(business_id), lead_id=str(lead.id), outcome=outcome.value, source=data.source
@@ -199,7 +212,7 @@ class LeadService:
         settings = await self.settings(business_id)
         values = data.model_dump(exclude_unset=True)
         self._check_custom_fields(settings, values.get("custom_fields", {}))
-        async with _business_locks[business_id]:
+        async with self.lock.hold(business_id):
             lead = await self.get(business_id, lead_id)
             saved = await self._apply(settings, lead, values)
         logger.fire(
@@ -213,7 +226,7 @@ class LeadService:
     async def rescore(self, business_id: uuid.UUID) -> RescoreResult:
         """Recompute every lead's score and priority, e.g. after the scoring settings changed."""
         settings = await self.settings(business_id)
-        async with _business_locks[business_id]:
+        async with self.lock.hold(business_id):
             leads, activities = await asyncio.gather(
                 self.leads.list_full(business_id), self.activities.all_for_business(business_id)
             )
@@ -332,7 +345,8 @@ class LeadService:
         derived, breakdown = self._derive(
             settings, draft, values, [Event(ActivityType.LEAD_CREATED, draft.created_at, metadata)]
         )
-        return await self.leads.save(business_id, None, derived, [created, _score_changed(None, breakdown)])
+        trigger = AnalysisTrigger.LEAD_CREATED if settings.auto_analyze else None
+        return await self.leads.save(business_id, None, derived, [created, _score_changed(None, breakdown)], trigger)
 
     async def _apply(
         self,
@@ -370,7 +384,7 @@ class LeadService:
         """Each record is saved on its own (one transaction per record), so one bad record never undoes the rest."""
         settings = await self.settings(business_id)
         logger.fire("lead_import_started", business_id=str(business_id), records=len(envelope.leads))
-        async with _business_locks[business_id]:
+        async with self.lock.hold(business_id):
             result = await self._import_records(settings, business_id, envelope)
         logger.fire(
             "lead_import_completed",

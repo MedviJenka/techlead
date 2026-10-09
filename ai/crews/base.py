@@ -2,6 +2,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
+from pathlib import Path
 from typing import Any, Self
 
 from crewai import Agent, Crew, CrewOutput, Memory, Process, Task
@@ -13,7 +14,6 @@ from ai.guardrails import Guardrail
 from ai.memory import AgentMemoryStore, MemoryKey
 from ai.ports import LeadReadService
 from ai.schemas import BusinessProfile, ModelTier
-from ai.skill_library import SkillLibrary
 from ai.tools import BusinessScopedTool
 from app.core.logger import Logger
 
@@ -26,27 +26,25 @@ class CrewExecutionError(RuntimeError):
 
 @dataclass(frozen=True)
 class AIRuntime:
-    """What every crew needs regardless of business: read access, model tiers and the skill library.
+    """What every crew needs regardless of business: read access and model tiers.
 
     ``memory`` gives each agent its own memory per business; None (tests, evals) runs agents without one.
     """
 
     service: LeadReadService
     llm: LLMResolver
-    skills: SkillLibrary
     verbose: bool = False
     guardrail_max_retries: int = 2
     max_agent_iterations: int = 8
     memory: AgentMemoryStore | None = None
 
     @classmethod
-    def from_env(cls, service: LeadReadService, skills: SkillLibrary | None = None) -> "AIRuntime":
+    def from_env(cls, service: LeadReadService) -> "AIRuntime":
         from settings import get_config  # lazy: importing ai.* must not require a configured environment
 
         return cls(
             service,
             LLMSettings.from_env().resolver(),
-            skills or SkillLibrary(),
             verbose=get_config().VERBOSE,
             memory=_memory_store(),
         )
@@ -54,8 +52,8 @@ class AIRuntime:
 
 class BusinessCrew:
     """
-    Base for @CrewBase crews. Prompts live in YAML; each @agent method declares its own model tier,
-    tools and skills (least privilege, MAIN_PLAN §43), so one crew file shows everything its agents can do.
+    Base for @CrewBase crews. Prompts live in YAML and skills in the crew's ``skills/`` folder; each @agent
+    method declares its own model tier and tools (least privilege, MAIN_PLAN §43).
 
     Fixed pipelines use @task/@crew. Single steps that a Flow orchestrates use ``run_step``, which
     builds the task per call so per-call guardrails never leak between runs.
@@ -65,6 +63,7 @@ class BusinessCrew:
     tasks: list[Task]
     agents_config: Any = "config/agents.yaml"
     tasks_config: Any = "config/tasks.yaml"
+    base_directory: Path  # the crew's folder, set by @CrewBase
 
     def __init__(self, business: BusinessProfile, runtime: AIRuntime) -> None:
         self.business = business
@@ -81,20 +80,14 @@ class BusinessCrew:
         *,
         tier: ModelTier,
         tools: Sequence[type[BusinessScopedTool]] = (),
-        skills: Sequence[str] = (),
-        business_context: bool = True,
         memory: bool = True,
     ) -> Agent:
-        """``business_context`` also attaches the industry and business-specific skills.
-
-        ``memory`` gives the agent its own memory for this business when the runtime has a memory store.
-        """
-        composed = self.runtime.skills.compose(skills, self.business, business_context=business_context)
+        """``memory`` gives the agent its own memory for this business when the runtime has a memory store."""
         return Agent(
             config=self.agents_config[name],
             llm=self.runtime.llm(tier),
             tools=[tool.bind(self.runtime.service, self.business.id) for tool in tools],
-            skills=composed or None,
+            skills=[self.base_directory / "skills"],
             allow_delegation=False,
             max_iter=self.runtime.max_agent_iterations,
             verbose=self.runtime.verbose,

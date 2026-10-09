@@ -15,8 +15,6 @@ ACTIVE_OUTREACH = frozenset({
 })
 LOW_EFFORT = frozenset({NextAction.NURTURE, NextAction.WAIT, NextAction.CLOSE_LOST})
 
-PRIORITY_ORDER = (Priority.LOW, Priority.MEDIUM, Priority.HIGH, Priority.CRITICAL)
-
 
 @dataclass(frozen=True)
 class EvalCase:
