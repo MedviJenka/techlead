@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from ai.crews import ConversationCrew, LeadIntelligenceCrew, ManagementCrew, SalesAssistantFlow
 from ai.data.sample_store import InMemoryLeadStore
-from ai.factory import SkillLibrary
 from ai.schemas import (
     AIScoreResult,
     Channel,
@@ -22,7 +22,8 @@ from ai.schemas import (
     QualificationResult,
     SalesAssistantAnswer,
 )
-from tests.conftest import BUSINESS_ID, make_factory
+from ai.skill_library import SkillLibrary
+from tests.conftest import BUSINESS_ID, make_crew
 from tests.fakes import ScriptedLLM
 
 QUALIFIED = QualificationResult(
@@ -49,7 +50,7 @@ class TestLeadIntelligenceCrew:
     ) -> None:
         llm = ScriptedLLM({"qualify_lead_task": [QUALIFIED], "score_lead_task": [AI_SCORE],
                            "recommend_next_action_task": [call_now()]})
-        crew = make_factory(store, llm, skill_library).lead_intelligence_crew(BUSINESS_ID)
+        crew = make_crew(LeadIntelligenceCrew, store, llm, skill_library)
 
         result = crew.analyze(tomer, store.list_activities(BUSINESS_ID, tomer.id))
 
@@ -65,7 +66,7 @@ class TestLeadIntelligenceCrew:
                                                     reason="Send details", requires_human_approval=False)
         llm = ScriptedLLM({"qualify_lead_task": [QUALIFIED], "score_lead_task": [AI_SCORE],
                            "recommend_next_action_task": [unapproved_email, call_now()]})
-        crew = make_factory(store, llm, skill_library).lead_intelligence_crew(BUSINESS_ID)
+        crew = make_crew(LeadIntelligenceCrew, store, llm, skill_library)
 
         result = crew.analyze(tomer)
 
@@ -77,7 +78,7 @@ class TestLeadIntelligenceCrew:
     ) -> None:
         inconsistent = AI_SCORE.model_copy(update={"overall_ai_score": 5})
         llm = ScriptedLLM({"qualify_lead_task": [QUALIFIED], "score_lead_task": [inconsistent]})
-        crew = make_factory(store, llm, skill_library).lead_intelligence_crew(BUSINESS_ID)
+        crew = make_crew(LeadIntelligenceCrew, store, llm, skill_library)
 
         with pytest.raises(Exception, match="guardrail"):
             crew.analyze(tomer)
@@ -89,7 +90,7 @@ class TestConversationCrew:
                                         sentiment="positive", decision_dependency="partner approval",
                                         requested_actions=["call on Sunday"])
         llm = ScriptedLLM({"analyze_conversation_task": [analysis]})
-        crew = make_factory(store, llm, skill_library).conversation_crew(BUSINESS_ID)
+        crew = make_crew(ConversationCrew, store, llm, skill_library)
         message = InboundMessage(channel=Channel.WHATSAPP, received_at=datetime.now(UTC),
                                  body="Looks good. I need to check it with my partner. Call me on Sunday.")
 
@@ -105,7 +106,7 @@ class TestConversationCrew:
         good = FollowupDraft(channel=Channel.WHATSAPP, objective="Confirm review", tone="warm",
                              message="Hi Tomer, did you get a chance to go over the routing plan with your partner?")
         llm = ScriptedLLM({"generate_followup_task": [pushy, good]})
-        crew = make_factory(store, llm, skill_library).conversation_crew(BUSINESS_ID)
+        crew = make_crew(ConversationCrew, store, llm, skill_library)
 
         draft = crew.draft_followup(tomer, Channel.WHATSAPP, recommendation=call_now())
 
@@ -121,7 +122,7 @@ class TestManagementCrew:
         grounded = SalesAssistantAnswer(answer="Call Tomer Katz first.", highlighted_leads=[
             LeadHighlight(lead_id="lead_008", name="Tomer Katz", reason="Immediate need", suggested_action=NextAction.CALL)])
         llm = ScriptedLLM({"interpret_question_task": [search], "explain_results_task": [invented, grounded]})
-        crew = make_factory(store, llm, skill_library).management_crew(BUSINESS_ID)
+        crew = make_crew(ManagementCrew, store, llm, skill_library)
 
         question = "Who should I call today?"
         parsed = crew.interpret_question(question)
@@ -135,9 +136,25 @@ class TestManagementCrew:
     def test_pipeline_review(self, store: InMemoryLeadStore, skill_library: SkillLibrary) -> None:
         review = PipelineReview(headline="1 hot lead not contacted", priorities_today=["Call Daniel Cohen"])
         llm = ScriptedLLM({"review_pipeline_task": [review]})
-        crew = make_factory(store, llm, skill_library).management_crew(BUSINESS_ID)
+        crew = make_crew(ManagementCrew, store, llm, skill_library)
         hot = store.search_leads(BUSINESS_ID, LeadSearchFilter(min_score=80))
 
         result = crew.review_pipeline(store.get_pipeline_metrics(BUSINESS_ID), hot)
 
         assert result.headline == review.headline
+
+    def test_sales_assistant_flow_runs_the_search_itself(
+        self, store: InMemoryLeadStore, skill_library: SkillLibrary
+    ) -> None:
+        tomer = LeadHighlight(lead_id="lead_008", name="Tomer Katz", reason="Immediate need",
+                              suggested_action=NextAction.CALL)
+        grounded = SalesAssistantAnswer(answer="Call Tomer Katz first.", highlighted_leads=[tomer])
+        llm = ScriptedLLM({"interpret_question_task": [LeadSearchFilter(min_score=80)],
+                           "explain_results_task": [grounded]})
+        flow = SalesAssistantFlow(make_crew(ManagementCrew, store, llm, skill_library))
+
+        answer = flow.ask("Who should I call today?")
+
+        assert answer == grounded
+        assert flow.state.leads and all(lead.lead_score >= 80 for lead in flow.state.leads)
+        assert llm.calls == ["interpret_question_task", "explain_results_task"]

@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 
 from ai.schemas.enums import Priority
-from app.core.logging import Logger
+from app.core.logger import Logger
 
 logger = Logger(__name__)
 

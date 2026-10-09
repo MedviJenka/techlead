@@ -9,12 +9,12 @@ from functools import cache
 from typing import TYPE_CHECKING, Protocol
 
 from ai.schemas import ActivitySnapshot, BusinessProfile, LeadSnapshot
-from app.core.logging import Logger
+from app.core.logger import Logger
 
 if TYPE_CHECKING:
     from ai.config import LLMResolver
     from ai.crews.lead_intelligence.crew import LeadIntelligenceResult
-    from ai.factory import SkillLibrary
+    from ai.skill_library import SkillLibrary
 
 logger = Logger(__name__)
 
@@ -28,7 +28,7 @@ class AnalysisEngine(Protocol):
 
 @cache
 def _skills() -> "SkillLibrary":
-    from ai.factory import SkillLibrary
+    from ai.skill_library import SkillLibrary
 
     return SkillLibrary()  # reads every SKILL.md once per process
 
@@ -45,14 +45,15 @@ class CrewAnalysisEngine:
     async def analyze(
         self, business: BusinessProfile, lead: LeadSnapshot, activities: list[ActivitySnapshot]
     ) -> "LeadIntelligenceResult":
-        from ai.config import LLMSettings
-        from ai.factory import BusinessCrewFactory
+        from ai.crews import AIRuntime, LeadIntelligenceCrew
         from app.analysis.read_service import SingleLeadReadService
 
         service = SingleLeadReadService(business, lead, activities)
-        resolver = self._llm_resolver or LLMSettings.from_env().resolver()
-        factory = BusinessCrewFactory(service, resolver, _skills())
-        crew = factory.lead_intelligence_crew(business.id)
+        if self._llm_resolver is None:
+            runtime = AIRuntime.from_env(service, _skills())
+        else:
+            runtime = AIRuntime(service, self._llm_resolver, _skills())
+        crew = LeadIntelligenceCrew(business, runtime)
         logger.fire("crew_kickoff", business_id=business.id, lead_id=lead.id, activities=len(activities))
         started = time.perf_counter()
         try:

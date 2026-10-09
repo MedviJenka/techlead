@@ -13,7 +13,7 @@ class LLMSettings:
 
     reasoning_model: str
     fast_model: str
-    temperature: float = 0.2
+    temperature: float | None = None  # None: the provider's default (reasoning models accept no other)
     timeout_seconds: float = 60.0
 
     @classmethod
@@ -24,6 +24,7 @@ class LLMSettings:
         return cls(
             reasoning_model=config.AI_REASONING_MODEL or config.OPENAI_MODEL,
             fast_model=config.AI_FAST_MODEL or config.OPENAI_MODEL,
+            temperature=config.AI_TEMPERATURE,
         )
 
     def resolver(self) -> LLMResolver:

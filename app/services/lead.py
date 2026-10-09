@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import uuid
 from collections import defaultdict
@@ -14,7 +12,7 @@ from supabase import AsyncClient
 from ai.schemas.enums import ActivityType
 from app.analysis import AnalysisEngine, to_activity_snapshot, to_business_profile, to_lead_snapshot
 from app.core.errors import BadGatewayError, NotFoundError, UnprocessableError
-from app.core.logging import Logger
+from app.core.logger import Logger
 from app.ingestion.adapters import AdaptedLead, JsonLeadAdapter, record_errors
 from app.intelligence import (
     Event,

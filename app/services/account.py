@@ -7,7 +7,7 @@ from supabase import AsyncClient
 
 from app.core.auth import AuthUser
 from app.core.errors import ConflictError, NotFoundError, UnprocessableError
-from app.core.logging import Logger
+from app.core.logger import Logger
 from app.models import Business
 from app.repositories import BusinessRepository, UserRepository
 from app.schemas import BusinessCreate

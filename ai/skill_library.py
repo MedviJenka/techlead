@@ -6,7 +6,7 @@ from crewai.skills.models import Skill
 
 from ai.schemas import BusinessProfile
 
-SKILLS_ROOT = Path(__file__).resolve().parents[1] / "skills"
+SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
 BUSINESS_SKILLS_DIR = "businesses"
 
 
