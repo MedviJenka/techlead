@@ -1,6 +1,5 @@
 """Runs the evaluation cases through LeadIntelligenceCrew and checks each answer."""
 
-import logging
 import time
 from collections.abc import Callable, Iterable, Mapping
 
@@ -10,8 +9,9 @@ from pydantic import BaseModel, Field, computed_field
 from ai.crews.lead_intelligence.crew import LeadIntelligenceCrew, LeadIntelligenceResult
 from ai.data.sample_store import InMemoryLeadStore
 from ai.evals.cases import PRIORITY_ORDER, RANKING, EvalCase
+from app.core.logger import Logger
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 
 class CaseResult(BaseModel):
@@ -58,8 +58,10 @@ class EvalReport(BaseModel):
             summary = ""
             if case.result is not None:
                 r = case.result
-                summary = (f"qualified={r.qualification.qualified} score={r.ai_score.overall_ai_score} "
-                           f"action={r.recommendation.action.value} priority={r.recommendation.priority.value}")
+                summary = (
+                    f"qualified={r.qualification.qualified} score={r.ai_score.overall_ai_score} "
+                    f"action={r.recommendation.action.value} priority={r.recommendation.priority.value}"
+                )
             lines.append(f"{'PASS' if case.passed else 'FAIL'}  {case.lead_id}  {case.elapsed_s:6.1f}s  {summary}")
             problems = [*case.failures, *([case.error] if case.error else [])]
             lines.extend(f"        - {problem}" for problem in problems)
@@ -69,9 +71,11 @@ class EvalReport(BaseModel):
         lines.append(f"Cases passed: {passed}/{len(self.cases)} ({self.pass_rate:.0%}, need {self.min_pass_rate:.0%})")
         usage = self.usage
         per_lead = usage.total_tokens // len(self.cases) if self.cases else 0
-        lines.append(f"Tokens: {usage.total_tokens} total ({usage.prompt_tokens} prompt, "
-                     f"{usage.completion_tokens} completion), ~{per_lead} per lead, "
-                     f"{usage.successful_requests} LLM requests")
+        lines.append(
+            f"Tokens: {usage.total_tokens} total ({usage.prompt_tokens} prompt, "
+            f"{usage.completion_tokens} completion), ~{per_lead} per lead, "
+            f"{usage.successful_requests} LLM requests"
+        )
         lines.append(f"Result: {'PASS' if self.passed else 'FAIL'}")
         return "\n".join(lines)
 
@@ -126,11 +130,22 @@ def run_lead_intelligence_eval(
         try:
             result = crew.analyze(lead, store.list_activities(business_id, case.lead_id))
         except Exception as exc:  # timeouts, malformed output, exhausted guardrail retries: all a failed case
-            logger.warning("eval_case_error", extra={"lead_id": case.lead_id, "error": repr(exc)})
-            results.append(CaseResult(lead_id=case.lead_id, error=f"{type(exc).__name__}: {exc}",
-                                      elapsed_s=round(time.perf_counter() - started, 1)))
+            logger.fire("eval_case_error", level="warning", lead_id=case.lead_id, error=repr(exc))
+            results.append(
+                CaseResult(
+                    lead_id=case.lead_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                    elapsed_s=round(time.perf_counter() - started, 1),
+                )
+            )
             continue
-        results.append(CaseResult(lead_id=case.lead_id, failures=check_case(case, result), result=result,
-                                  elapsed_s=round(time.perf_counter() - started, 1)))
+        results.append(
+            CaseResult(
+                lead_id=case.lead_id,
+                failures=check_case(case, result),
+                result=result,
+                elapsed_s=round(time.perf_counter() - started, 1),
+            )
+        )
     scores = {case.lead_id: case.result.ai_score.overall_ai_score for case in results if case.result is not None}
     return EvalReport(model=model, cases=results, ranking_failures=check_ranking(scores), min_pass_rate=min_pass_rate)
