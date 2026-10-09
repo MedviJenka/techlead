@@ -2728,6 +2728,15 @@ Choose one niche (real estate, insurance or automotive: whichever customers are 
 
 Done when: 3–5 businesses use it daily, and at least one pays.
 
+Status: built; "done" needs real businesses. Channel: WhatsApp Cloud API. Niche: real estate (industry preset in
+`app/presets.py`; the market is the business's `configuration.phone_region`). `POST /webhooks/whatsapp` verifies
+Meta's signature and claims each message in `ingest_events` (`claim_ingest_event`): processed once, retried on
+redelivery when it failed. Phones are E.164 (`phonenumbers`). A message creates or joins the lead by phone and queues
+NewLeadFlow; its last step (`FirstReply`) drafts a reply with ConversationCrew and sends it to the owner's WhatsApp
+with Approve / Edit / Reject (an approved template when the owner is outside the 24-hour window); the dashboard is
+the fallback. Outcome metrics on the dashboard: median time to first response, open leads without a response,
+replies waiting for approval. Remaining: connect a real number, onboard 3–5 real-estate businesses, measure.
+
 ---
 
 # 67. Phase 8 — Conversation Intelligence

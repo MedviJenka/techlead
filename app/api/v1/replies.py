@@ -51,7 +51,8 @@ async def pending_replies(
     business_id: uuid.UUID, service: ReplyServiceDep, limit: Annotated[int, Query(ge=1, le=100)] = 25
 ) -> list[ReplyDraftRead]:
     """Drafts waiting for a decision (or whose sending failed), newest first: the dashboard's approval queue."""
-    return [_read(draft) for draft in await service.pending(business_id, limit)]
+    pending = await service.pending(business_id, limit)
+    return [ReplyDraftRead.model_validate(draft.model_dump() | {"lead_name": name}) for draft, name in pending]
 
 
 @router.get("/leads/{lead_id}/replies", response_model=list[ReplyDraftRead])

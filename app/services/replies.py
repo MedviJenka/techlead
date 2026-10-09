@@ -124,10 +124,14 @@ class ReplyService:
 
     # --- drafts ---
 
-    async def pending(self, business_id: uuid.UUID, limit: int) -> list[ReplyDraft]:
+    async def pending(self, business_id: uuid.UUID, limit: int) -> list[tuple[ReplyDraft, str]]:
+        """Drafts waiting for a decision (or whose sending failed), newest first, with their lead's name."""
         await self.leads.settings(business_id)
         statuses = [*OPEN_DRAFT_STATUSES, ReplyDraftStatus.FAILED]
-        return await self.drafts.with_status(business_id, statuses, limit)
+        drafts = await self.drafts.with_status(business_id, statuses, limit)
+        leads = await self.leads.leads.get_many(business_id, list({draft.lead_id for draft in drafts}))
+        labels = {lead.id: lead_label(lead) for lead in leads}
+        return [(draft, labels.get(draft.lead_id, "the lead")) for draft in drafts]
 
     async def for_lead(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> list[ReplyDraft]:
         await self.leads.get(business_id, lead_id)

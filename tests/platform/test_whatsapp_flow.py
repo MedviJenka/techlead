@@ -10,6 +10,7 @@ import pytest
 
 from ai.schemas import Channel, FollowupDraft, NextActionRecommendation
 from ai.schemas.enums import ActivityType
+from app.analysis.drafting import CrewReplyDrafter
 from app.analysis.first_reply import FirstReply
 from app.analysis.flow import NewLeadFlow
 from app.channels.whatsapp import WhatsAppSendError, parse_messages
@@ -18,6 +19,7 @@ from app.models import Business, DecisionChannel, IngestStatus, Lead, ReplyDraft
 from app.services.inbox import InboxError, WhatsAppInbox
 from app.services.lead import InboundChannelMessage, LeadService
 from app.services.replies import ApprovalTemplate, ReplyService, approval_text, parse_decision
+from tests.fakes import ScriptedLLM
 from tests.platform.memory import (
     NOW,
     OWNER_PHONE,
@@ -121,6 +123,7 @@ async def test_later_messages_join_the_lead_with_the_same_phone(
     assert (received[0].id, received[1]) == (lead.id, False)
     assert len(store.leads) == 1
     assert store.types(lead.id).count(ActivityType.WHATSAPP_RECEIVED) == 2
+    assert ActivityType.LEAD_UPDATED not in store.types(lead.id)  # the message itself explains the new contact time
     assert len(store.jobs.jobs) == 1
 
 
@@ -192,7 +195,7 @@ async def test_undelivered_approval_request_waits_on_the_dashboard(
     saved = drafts.only()
     assert saved.status is ReplyDraftStatus.PENDING_APPROVAL
     assert saved.last_error and "Re-engagement message" in saved.last_error
-    assert [d.id for d in await replies.pending(business.id, 10)] == [draft.id]
+    assert [(d.id, name) for d, name in await replies.pending(business.id, 10)] == [(draft.id, "Dana Levi")]
 
 
 # --- decisions ---
@@ -466,3 +469,22 @@ async def test_a_failed_draft_does_not_fail_the_analysis(
     outcome = await NewLeadFlow(service, FakeEngine(), "openai/test", None, step).run(business.id, lead.id)
     assert outcome.lead.ai_summary is not None
     assert ActivityType.AI_ANALYSIS in store.types(lead.id)
+
+
+async def test_real_conversation_crew_drafts_the_first_reply(
+    service: LeadService, replies: ReplyService, business: Business, drafts: FakeDrafts, sender: FakeSender
+) -> None:
+    lead = await new_lead(service, business)
+    reply = FollowupDraft(
+        channel=Channel.WHATSAPP, message="Hi Dana! Happy to help. Which area are you looking in?",
+        objective="Learn the area", tone="warm",
+    )
+    llm = ScriptedLLM({"generate_followup_task": [reply]})
+    step = first_reply(service, replies, CrewReplyDrafter(lambda tier: llm))
+
+    draft = await step.run(business.id, lead.id, None)
+
+    assert llm.calls == ["generate_followup_task"]
+    assert draft is not None and draft.message == reply.message
+    assert drafts.only().objective == "Learn the area"
+    assert sender.sent[0][2].endswith(reply.message)

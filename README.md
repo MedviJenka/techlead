@@ -33,10 +33,10 @@ Create the tables by pasting the files in `db/` into the Supabase SQL editor, in
 
 | File | What |
 |---|---|
-| `001_core_tables.sql` | `businesses`, `leads`, `activities`, `analysis_jobs`, `business_locks` |
+| `001_core_tables.sql` | `businesses`, `leads`, `activities`, `analysis_jobs`, `business_locks`, `whatsapp_accounts`, `ingest_events`, `reply_drafts` |
 | `002_users.sql` | `users` (app profile; `id` is the Supabase Auth user id) |
 | `003_lock_down_data_api.sql` | RLS on, publishable key gets no access, secret key (`service_role`) gets full access |
-| `004_functions.sql` | `save_lead` (lead + activities + job in one transaction), the AI job queue, the per-business lock |
+| `004_functions.sql` | `save_lead` (lead + activities + job in one transaction), the AI job queue, the per-business lock, `claim_ingest_event` (webhook idempotency) |
 
 Every file is safe to run again. To change the schema, edit or add a file in `db/`, run it in the SQL editor, and
 update the matching row model in `app/models/`. A new table also goes into `003_lock_down_data_api.sql`.
@@ -195,4 +195,40 @@ score, the blended final score and priority, and a priority route (hot / warm / 
   and worker processes can write safely; a lead and its activities are saved in one transaction (`save_lead`).
 
 Run it once by hand with `python -m ai.crews.lead_intelligence lead_008` (sample data, real LLM calls).
+
+## WhatsApp: first reply within a minute (Phase 7)
+
+A lead writes to the business's WhatsApp number; within a minute the owner gets an AI-drafted reply on their own
+WhatsApp with **Approve / Edit / Reject**. Nothing reaches a lead until the owner approves it.
+
+```text
+lead writes on WhatsApp ──> POST /api/v1/webhooks/whatsapp (signature checked, ingest_events: once per message)
+   └─> lead created or joined by phone (E.164) + whatsapp_received activity + analysis job, in one transaction
+worker: NewLeadFlow ──> LeadIntelligenceCrew, score, priority route ──> ConversationCrew drafts the first reply
+   └─> reply_drafts row ──> owner's WhatsApp: "New lead … Suggested reply …" [Approve] [Edit] [Reject]
+owner taps Approve ──> reply sent to the lead, whatsapp_sent activity (the lead counts as answered)
+owner taps Edit ──> "Send me the reply as you want it" ──> their next message is sent instead
+```
+
+Setup (once per deployment, in a Meta developer app with the WhatsApp product):
+
+1. In `.env`: `WHATSAPP_ACCESS_TOKEN` (a system-user token with `whatsapp_business_messaging`),
+   `WHATSAPP_APP_SECRET` (App settings > Basic) and `WHATSAPP_VERIFY_TOKEN` (any secret string).
+2. In the Meta app's WhatsApp webhook settings: callback URL `https://<your host>/api/v1/webhooks/whatsapp`, the
+   same verify token, and subscribe to the `messages` field.
+3. Each business: **Settings > WhatsApp**: the number's *Phone number ID* and the owner's own WhatsApp number.
+   Set **Country code for phone numbers** too, so local numbers (`050-…`) match WhatsApp's international ones.
+
+- **Owner outside the 24-hour window**: WhatsApp only delivers free-form messages to people who wrote in the last
+  24 hours. Create an approved template (body `{{1}}` lead name, `{{2}}` suggested reply, three quick-reply buttons:
+  Approve, Edit, Reject) and set `WHATSAPP_APPROVAL_TEMPLATE`; without one, such drafts wait on the dashboard.
+- **Dashboard fallback**: the dashboard lists replies waiting for a decision (approve, edit, reject there too) and
+  shows the median time to first response and the open leads nobody has answered.
+- **Idempotency**: every inbound message is claimed in `ingest_events` before it is processed. A redelivered webhook
+  changes nothing; a message that failed answers `500`, so Meta redelivers it and only it is processed again.
+- **Decisions**: one draft per lead is open at a time, and approving, editing or rejecting is a conditional update:
+  a double tap, or the phone and the dashboard at once, send at most one reply.
+- **Industry preset**: choosing *Real estate* when creating a business starts it with real-estate lead fields (area,
+  rooms, budget, financing, move-in timing...), scoring rules, fast follow-up timing and AI instructions
+  (`app/presets.py`, `GET /api/v1/businesses/presets`). Everything stays editable in Settings.
 

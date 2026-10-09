@@ -36,6 +36,8 @@ class ReplyDraftRead(BaseModel):
     created_at: datetime
     decided_at: datetime | None
     sent_at: datetime | None
+    # Only in the approval queue (``GET /replies``).
+    lead_name: str | None = None
 
 
 ReplyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=REPLY_MAX_LENGTH)]

@@ -3,6 +3,7 @@ import { type FormEvent, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router'
 
 import { useCreateBusiness, useMe } from '../api/hooks'
+import { usePresets } from '../api/replies'
 import { inputClass } from '../components/leadDisplay'
 import { Button, ErrorState, Icon, Reveal, Skeleton, Stagger } from '../components/ui'
 import { spring } from '../components/motion'
@@ -39,11 +40,14 @@ function CreateBusiness() {
   const [industry, setIndustry] = useState('')
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone)
   const effectiveSlug = slug || slugify(name)
+  // An industry with a preset starts with its lead fields, scoring and AI instructions.
+  const presets = usePresets()
+  const preset = presets.data?.find((p) => p.industry.toLowerCase() === industry.trim().toLowerCase())
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
     createBusiness.mutate(
-      { name, slug: effectiveSlug, industry: industry || null, timezone },
+      { name, slug: effectiveSlug, industry: industry || null, timezone, preset: preset?.key ?? null },
       { onSuccess: (business) => navigate(`/businesses/${business.id}`) },
     )
   }
@@ -102,6 +106,22 @@ function CreateBusiness() {
               ))}
             </div>
             <input className={inputClass} value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="Or type your own" aria-label="Industry" />
+            <AnimatePresence>
+              {preset && (
+                <motion.p
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex items-start gap-1.5 rounded-sm bg-primary-soft px-3 py-2 font-normal text-primary"
+                >
+                  <Icon name="auto_awesome" className="text-base!" />
+                  <span>
+                    Starts ready for {preset.label.toLowerCase()}: {preset.description} {preset.custom_field_definitions.length} lead fields, scoring and AI
+                    instructions are set up for you; adjust them anytime in Settings.
+                  </span>
+                </motion.p>
+              )}
+            </AnimatePresence>
           </div>
           <label className="flex flex-col gap-1 text-xs font-medium text-ink-muted">
             Timezone

@@ -3,8 +3,10 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 
 import { useActivities, useAnalysisState, useAnalyze, useLead, useLeadMutation, useScore } from '../api/leads'
+import { useLeadReplies } from '../api/replies'
 import type { LeadDetail } from '../api/types'
 import { Pagination } from '../components/Leads'
+import { ReplyDraftCard } from '../components/Replies'
 import { daysSince, dueLabel, FOLLOW_UP_REASON, inputClass, leadName, relativeTime, titleCase } from '../components/leadDisplay'
 import { AiCard, Avatar, Button, Card, CardHeader, EmptyState, ErrorState, Icon, PriorityFlag, Skeleton, SourceChip, Stagger, StatusChip, Toast } from '../components/ui'
 import { fadeUp, scoreTone, spring } from '../components/motion'
@@ -453,6 +455,22 @@ function CustomFields({ fields }: { fields: Record<string, unknown> }) {
   )
 }
 
+// The lead's AI-drafted replies, newest first; shown only once there is one (WhatsApp leads).
+function Replies({ businessId, leadId }: { businessId: string; leadId: string }) {
+  const replies = useLeadReplies(businessId, leadId)
+  if (!replies.data?.length) return null
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader title="Replies" icon="forum" />
+      <div className="divide-y divide-line">
+        {replies.data.map((draft) => (
+          <ReplyDraftCard key={draft.id} businessId={businessId} draft={draft} />
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 function LeadSkeleton() {
   return (
     <div className="space-y-5" aria-busy="true">
@@ -481,6 +499,7 @@ export function LeadPage() {
           <LeadHeader lead={lead} />
           <div className="grid items-start gap-5 lg:grid-cols-3">
             <Stagger className="space-y-5 lg:col-span-2" step={0.1}>
+              <Replies businessId={businessId} leadId={leadId} />
               <Analysis businessId={businessId} lead={lead} key={lead.id} />
               <Timeline businessId={businessId} leadId={leadId} key={`${businessId}/${leadId}`} />
             </Stagger>

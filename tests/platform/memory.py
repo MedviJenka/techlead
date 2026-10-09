@@ -128,6 +128,9 @@ class FakeStore:
     async def get(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> Lead | None:
         return self.leads.get(lead_id)
 
+    async def get_many(self, business_id: uuid.UUID, lead_ids: list[uuid.UUID]) -> list[Lead]:
+        return [self.leads[lead_id] for lead_id in lead_ids if lead_id in self.leads]
+
     async def get_by_external_id(self, business_id: uuid.UUID, source: str, external_id: str) -> Lead | None:
         return next(
             (lead for lead in self.leads.values() if (lead.source, lead.external_id) == (source, external_id)), None

@@ -206,7 +206,7 @@ async def test_dashboard_approves_and_rejects_from_the_queue(
     base = f"{api_prefix}/businesses/{business.id}"
 
     queue = (await dashboard.get(f"{base}/replies")).json()
-    assert [d["id"] for d in queue] == [str(first.id)]
+    assert [(d["id"], d["lead_name"]) for d in queue] == [(str(first.id), "Dana Levi")]
 
     approved = await dashboard.post(f"{base}/replies/{first.id}/approve", json={"message": " Hi Dana, which area? "})
     assert approved.status_code == 200

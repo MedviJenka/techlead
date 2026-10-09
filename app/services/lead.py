@@ -492,7 +492,9 @@ class LeadService:
         if not changes and not extra:
             return None
         activities = list(extra)
-        if set(changes) - {"lead_score", "priority"}:
+        # A message activity in ``extra`` already explains the new last_contact_at.
+        quiet = {"lead_score", "priority"} | ({"last_contact_at"} if extra else set())
+        if set(changes) - quiet:
             activities.append(_activity(ActivityType.LEAD_UPDATED, "Lead updated", {"fields": sorted(changes)}))
         if "status" in changes:
             metadata = {"from": lead.status, "to": changes["status"]}
