@@ -125,3 +125,77 @@ CREATE TABLE IF NOT EXISTS business_locks (
     CONSTRAINT fk_business_locks_business_id_businesses
         FOREIGN KEY (business_id) REFERENCES businesses (id) ON DELETE CASCADE
 );
+
+-- A business's WhatsApp Business number (MAIN_PLAN §66). Inbound webhooks name the Meta `phone_number_id`, which
+-- maps the event to its business. Messages from `owner_phone` (E.164) are the owner's approval decisions.
+CREATE TABLE IF NOT EXISTS whatsapp_accounts (
+    business_id     UUID        NOT NULL,
+    phone_number_id VARCHAR(64) NOT NULL,
+    display_phone   VARCHAR(32),
+    owner_phone     VARCHAR(32) NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT pk_whatsapp_accounts PRIMARY KEY (business_id),
+    CONSTRAINT fk_whatsapp_accounts_business_id_businesses
+        FOREIGN KEY (business_id) REFERENCES businesses (id) ON DELETE CASCADE,
+    CONSTRAINT uq_whatsapp_accounts_phone_number_id UNIQUE (phone_number_id)
+);
+
+-- Every inbound webhook event, recorded before it is processed (MAIN_PLAN §59): a redelivered event is processed
+-- once. claim_ingest_event (db/004_functions.sql) inserts it or hands back a failed (or stuck) one for a retry.
+CREATE TABLE IF NOT EXISTS ingest_events (
+    id                UUID         NOT NULL DEFAULT gen_random_uuid(),
+    business_id       UUID         NOT NULL,
+    source            VARCHAR(32)  NOT NULL,
+    external_event_id VARCHAR(255) NOT NULL,
+    event_type        VARCHAR(32)  NOT NULL,
+    status            VARCHAR(32)  NOT NULL DEFAULT 'processing',
+    attempts          INTEGER      NOT NULL DEFAULT 1,
+    payload           JSONB        NOT NULL DEFAULT '{}',
+    last_error        TEXT,
+    created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    processed_at      TIMESTAMPTZ,
+    CONSTRAINT pk_ingest_events PRIMARY KEY (id),
+    CONSTRAINT fk_ingest_events_business_id_businesses
+        FOREIGN KEY (business_id) REFERENCES businesses (id) ON DELETE CASCADE,
+    CONSTRAINT uq_ingest_events_business_id_source_external_event_id UNIQUE (business_id, source, external_event_id),
+    CONSTRAINT ck_ingest_events_ingest_status CHECK (status IN ('processing', 'processed', 'ignored', 'failed'))
+);
+
+-- AI-drafted replies awaiting the owner (MAIN_PLAN §42, §66): Approve sends it, Edit sends the owner's text instead,
+-- Reject drops it. `approval_message_id` is the approval request sent to the owner on WhatsApp.
+CREATE TABLE IF NOT EXISTS reply_drafts (
+    id                  UUID         NOT NULL DEFAULT gen_random_uuid(),
+    business_id         UUID         NOT NULL,
+    lead_id             UUID         NOT NULL,
+    channel             VARCHAR(32)  NOT NULL,
+    message             TEXT         NOT NULL,
+    objective           TEXT,
+    status              VARCHAR(32)  NOT NULL DEFAULT 'pending_approval',
+    edited              BOOLEAN      NOT NULL DEFAULT false,
+    decided_via         VARCHAR(32),
+    approval_message_id VARCHAR(255),
+    sent_message_id     VARCHAR(255),
+    last_error          TEXT,
+    created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    decided_at          TIMESTAMPTZ,
+    sent_at             TIMESTAMPTZ,
+    CONSTRAINT pk_reply_drafts PRIMARY KEY (id),
+    CONSTRAINT fk_reply_drafts_business_id_businesses
+        FOREIGN KEY (business_id) REFERENCES businesses (id) ON DELETE CASCADE,
+    CONSTRAINT fk_reply_drafts_business_id_lead_id_leads
+        FOREIGN KEY (business_id, lead_id) REFERENCES leads (business_id, id) ON DELETE CASCADE,
+    CONSTRAINT ck_reply_drafts_reply_draft_status CHECK (status IN (
+        'pending_approval', 'awaiting_edit', 'sending', 'sent', 'rejected', 'failed'
+    )),
+    CONSTRAINT ck_reply_drafts_reply_channel CHECK (channel IN ('whatsapp', 'email', 'sms', 'phone', 'crm_task')),
+    CONSTRAINT ck_reply_drafts_decision_channel CHECK (decided_via IN ('whatsapp', 'dashboard'))
+);
+
+-- At most one undecided draft per lead.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_reply_drafts_open_lead
+    ON reply_drafts (business_id, lead_id) WHERE status IN ('pending_approval', 'awaiting_edit', 'sending');
+CREATE INDEX IF NOT EXISTS ix_reply_drafts_business_id_status_created_at
+    ON reply_drafts (business_id, status, created_at);

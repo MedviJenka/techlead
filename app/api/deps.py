@@ -12,7 +12,10 @@ from app.repositories import BusinessRepository
 from app.services import BusinessService
 from app.services.account import AccountService
 from app.services.dashboard import DashboardService
+from app.services.inbox import WhatsAppInbox
 from app.services.lead import LeadService
+from app.services.replies import ApprovalTemplate, ReplyService, whatsapp_sender
+from settings import get_config
 
 SupabaseDep = Annotated[AsyncClient, Depends(get_supabase)]
 
@@ -47,3 +50,20 @@ def get_dashboard_service(db: SupabaseDep) -> DashboardService:
 LeadServiceDep = Annotated[LeadService, Depends(get_lead_service)]
 DashboardServiceDep = Annotated[DashboardService, Depends(get_dashboard_service)]
 
+
+
+def get_reply_service(
+    db: SupabaseDep, leads: LeadServiceDep, now: Annotated[datetime, Depends(utc_now)]
+) -> ReplyService:
+    config = get_config()
+    return ReplyService(db, leads, whatsapp_sender(config), ApprovalTemplate.from_settings(config), now)
+
+
+ReplyServiceDep = Annotated[ReplyService, Depends(get_reply_service)]
+
+
+def get_whatsapp_inbox(db: SupabaseDep, leads: LeadServiceDep, replies: ReplyServiceDep) -> WhatsAppInbox:
+    return WhatsAppInbox(db, leads, replies)
+
+
+WhatsAppInboxDep = Annotated[WhatsAppInbox, Depends(get_whatsapp_inbox)]

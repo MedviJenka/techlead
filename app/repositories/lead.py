@@ -43,6 +43,18 @@ class LeadRepository:
     async def get(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> Lead | None:
         return await self._first(business_id, id=str(lead_id))
 
+    async def get_many(self, business_id: uuid.UUID, lead_ids: list[uuid.UUID]) -> list[Lead]:
+        if not lead_ids:
+            return []
+        response = (
+            await self._db.table("leads")
+            .select("*")
+            .eq("business_id", str(business_id))
+            .in_("id", [str(lead_id) for lead_id in lead_ids])
+            .execute()
+        )
+        return [Lead.model_validate(row) for row in response.data]
+
     async def get_by_external_id(self, business_id: uuid.UUID, source: str, external_id: str) -> Lead | None:
         return await self._first(business_id, source=source, external_id=external_id)
 

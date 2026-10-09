@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -9,11 +10,12 @@ from postgrest.exceptions import APIError
 from pydantic import ValidationError
 from supabase import AsyncClient
 
-from ai.schemas.enums import ActivityType
+from ai.schemas.enums import ActivityType, Channel
 from app.core.errors import NotFoundError, UnprocessableError
 from app.core.locks import BusinessLock, DatabaseBusinessLock
 from app.core.logger import Logger
 from app.ingestion.adapters import AdaptedLead, JsonLeadAdapter, record_errors
+from app.ingestion.normalize import to_e164
 from app.intelligence import (
     Event,
     ScoreBreakdown,
@@ -62,6 +64,57 @@ class InvalidCustomFields(UnprocessableError):
 
 def _activity(activity_type: ActivityType, description: str, metadata: dict[str, Any], **extra: Any) -> dict[str, Any]:
     return {"activity_type": activity_type, "description": description, "metadata": metadata} | extra
+
+
+def _split_name(name: str | None) -> tuple[str | None, str | None]:
+    """A profile name as (first, last): ``"Dana Levi"`` -> ``("Dana", "Levi")``; clipped to the column sizes."""
+    parts = (name or "").split(maxsplit=1)
+    first = parts[0][:100] if parts else None
+    last = parts[1][:100] if len(parts) > 1 else None
+    return first, last
+
+
+@dataclass(frozen=True)
+class InboundChannelMessage:
+    """A message a lead sent on a channel. ``phone`` is E.164 or national (read in the business's country)."""
+
+    channel: Channel
+    message_id: str
+    phone: str
+    sender_name: str | None
+    body: str | None
+    kind: str
+    sent_at: datetime
+
+    @property
+    def activity_type(self) -> ActivityType:
+        return _RECEIVED[self.channel]
+
+    @property
+    def description(self) -> str:
+        label = _CHANNEL_LABELS[self.channel]
+        return f"{label} message received" if self.kind == "text" else f"{label} {self.kind} received"
+
+
+@dataclass(frozen=True)
+class OutboundChannelMessage:
+    channel: Channel
+    message_id: str
+    body: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def activity_type(self) -> ActivityType:
+        return _SENT[self.channel]
+
+    @property
+    def description(self) -> str:
+        return f"{_CHANNEL_LABELS[self.channel]} message sent"
+
+
+_RECEIVED = {Channel.WHATSAPP: ActivityType.WHATSAPP_RECEIVED, Channel.EMAIL: ActivityType.EMAIL_RECEIVED}
+_SENT = {Channel.WHATSAPP: ActivityType.WHATSAPP_SENT, Channel.EMAIL: ActivityType.EMAIL_SENT}
+_CHANNEL_LABELS = {Channel.WHATSAPP: "WhatsApp", Channel.EMAIL: "Email"}
 
 
 def _events(activities: list[Activity]) -> list[Event]:
@@ -212,6 +265,8 @@ class LeadService:
         settings = await self.settings(business_id)
         values = data.model_dump(exclude_unset=True)
         self._check_custom_fields(settings, values.get("custom_fields", {}))
+        if values.get("phone"):
+            values["phone"] = to_e164(values["phone"], settings.configuration.phone_region)
         async with self.lock.hold(business_id):
             lead = await self.get(business_id, lead_id)
             saved = await self._apply(settings, lead, values)
@@ -285,6 +340,8 @@ class LeadService:
         adapted: AdaptedLead | None = None,
     ) -> tuple[Lead, ImportOutcome]:
         self._check_custom_fields(settings, data.custom_fields)
+        if data.phone:
+            data = data.model_copy(update={"phone": to_e164(data.phone, settings.configuration.phone_region)})
         lead = await self._match(business_id, data)
         values = data.model_dump(exclude_none=True)
         if adapted:
@@ -292,15 +349,23 @@ class LeadService:
         if lead is None:
             return await self._insert(settings, business_id, values, adapted), ImportOutcome.CREATED
         # Preserve the original source identity and timestamp on contact matches.
-        for field in ("source", "external_id", "created_at"):
-            values.pop(field, None)
+        for key in ("source", "external_id", "created_at"):
+            values.pop(key, None)
         values["custom_fields"] = lead.custom_fields | data.custom_fields
         updated = await self._apply(settings, lead, values)
         return (updated, ImportOutcome.UPDATED) if updated else (lead, ImportOutcome.SKIPPED)
 
     async def _insert(
-        self, settings: BusinessSettings, business_id: uuid.UUID, values: dict[str, Any], adapted: AdaptedLead | None
+        self,
+        settings: BusinessSettings,
+        business_id: uuid.UUID,
+        values: dict[str, Any],
+        adapted: AdaptedLead | None,
+        *,
+        channel: Channel | None = None,
+        extra: Sequence[dict[str, Any]] = (),
     ) -> Lead:
+        """Insert a lead with its creation activity, then ``extra`` activities (e.g. the message that created it)."""
         metadata = (
             {}
             if adapted is None
@@ -314,7 +379,7 @@ class LeadService:
             ActivityType.LEAD_CREATED,
             "Lead imported" if adapted else "Lead created",
             metadata,
-            channel=adapted.history.preferred_channel if adapted else None,
+            channel=adapted.history.preferred_channel if adapted else channel,
         )
         # The row as it will be stored, so facts see the same defaults the database applies.
         draft = Lead.model_validate(
@@ -342,11 +407,69 @@ class LeadService:
             }
             | values
         )
-        derived, breakdown = self._derive(
-            settings, draft, values, [Event(ActivityType.LEAD_CREATED, draft.created_at, metadata)]
-        )
+        events = [
+            Event(ActivityType.LEAD_CREATED, draft.created_at, metadata),
+            *(Event(a["activity_type"], draft.created_at, a["metadata"]) for a in extra),
+        ]
+        derived, breakdown = self._derive(settings, draft, values, events)
         trigger = AnalysisTrigger.LEAD_CREATED if settings.auto_analyze else None
-        return await self.leads.save(business_id, None, derived, [created, _score_changed(None, breakdown)], trigger)
+        activities = [created, *extra, _score_changed(None, breakdown)]
+        return await self.leads.save(business_id, None, derived, activities, trigger)
+
+    async def receive_message(self, business_id: uuid.UUID, message: InboundChannelMessage) -> tuple[Lead, bool] | None:
+        """Record a message a lead sent on a channel: on the lead with that phone, or on a new lead (which queues
+        NewLeadFlow like any other). ``(lead, created)``, or None when the message is already recorded.
+        """
+        settings = await self.settings(business_id)
+        received = _activity(
+            message.activity_type,
+            message.description,
+            {"message_id": message.message_id, "body": message.body, "kind": message.kind},
+            channel=message.channel,
+        )
+        phone = to_e164(message.phone, settings.configuration.phone_region)
+        async with self.lock.hold(business_id):
+            if await self.activities.has_message(business_id, message.message_id):
+                return None
+            lead = await self.leads.get_oldest_by_phone(business_id, phone)
+            if lead is None:
+                first_name, last_name = _split_name(message.sender_name)
+                values = {
+                    "source": message.channel.value,
+                    "phone": phone,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "notes": message.body,
+                    "last_contact_at": message.sent_at,
+                }
+                values = {key: value for key, value in values.items() if value is not None}
+                lead = await self._insert(
+                    settings, business_id, values, None, channel=message.channel, extra=[received]
+                )
+                created = True
+            else:
+                saved = await self._apply(settings, lead, {"last_contact_at": message.sent_at}, extra=[received])
+                lead, created = saved or lead, False
+        logger.fire(
+            "lead_message_received", business_id=str(business_id), lead_id=str(lead.id), channel=message.channel.value,
+            created=created, kind=message.kind,
+        )
+        return lead, created
+
+    async def record_outbound(
+        self, business_id: uuid.UUID, lead_id: uuid.UUID, message: OutboundChannelMessage
+    ) -> Lead:
+        """Record a message sent to the lead (it counts as a contact for scoring and follow-up timing)."""
+        settings = await self.settings(business_id)
+        metadata = {"message_id": message.message_id, "body": message.body} | message.metadata
+        sent = _activity(message.activity_type, message.description, metadata, channel=message.channel)
+        async with self.lock.hold(business_id):
+            lead = await self.get(business_id, lead_id)
+            saved = await self._apply(settings, lead, {"last_contact_at": self.now}, extra=[sent]) or lead
+        logger.fire(
+            "lead_message_sent", business_id=str(business_id), lead_id=str(lead_id), channel=message.channel.value
+        )
+        return saved
 
     async def _apply(
         self,
@@ -369,7 +492,9 @@ class LeadService:
         if not changes and not extra:
             return None
         activities = list(extra)
-        if set(changes) - {"lead_score", "priority"}:
+        # A message activity in ``extra`` already explains the new last_contact_at.
+        quiet = {"lead_score", "priority"} | ({"last_contact_at"} if extra else set())
+        if set(changes) - quiet:
             activities.append(_activity(ActivityType.LEAD_UPDATED, "Lead updated", {"fields": sorted(changes)}))
         if "status" in changes:
             metadata = {"from": lead.status, "to": changes["status"]}

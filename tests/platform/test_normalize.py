@@ -22,6 +22,7 @@ from app.ingestion.normalize import (
     normalize_email,
     normalize_phone,
     normalize_token,
+    to_e164,
 )
 from app.schemas.lead import LeadCreate, LeadListParams, LeadUpdate
 
@@ -52,17 +53,36 @@ def test_invalid_emails_are_rejected(value: str) -> None:
         ("050-123-4567", "0501234567"),
         ("(050) 123.4567", "0501234567"),
         ("1234567", "1234567"),
-        ("+123456789012345", "+123456789012345"),
+        ("+44 20 7946 0958", "+442079460958"),
     ],
 )
 def test_phone_keeps_leading_plus_and_digits(value: str, expected: str) -> None:
     assert normalize_phone(value) == expected
 
 
-@pytest.mark.parametrize("value", ["123456", "1234567890123456", "050-CALL-NOW", "++972501234567", "972+501234567"])
+@pytest.mark.parametrize(
+    "value",
+    ["123456", "1234567890123456", "050-CALL-NOW", "++972501234567", "972+501234567", "+1234567", "+123456789012345"],
+)
 def test_invalid_phones_are_rejected(value: str) -> None:
     with pytest.raises(ValueError):
         normalize_phone(value)
+
+
+@pytest.mark.parametrize(
+    ("phone", "region", "expected"),
+    [
+        ("0501234567", "IL", "+972501234567"),
+        ("2025550143", "US", "+12025550143"),
+        ("+972501234567", "US", "+972501234567"),
+        ("0501234567", None, "0501234567"),
+        ("12345678901234", "IL", "12345678901234"),
+    ],
+)
+def test_to_e164_reads_national_numbers_in_the_business_country(
+    phone: str, region: str | None, expected: str
+) -> None:
+    assert to_e164(phone, region) == expected
 
 
 @pytest.mark.parametrize(

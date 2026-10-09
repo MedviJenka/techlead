@@ -115,12 +115,38 @@ AS $$
     RETURNING true;
 $$;
 
+-- Record an inbound webhook event and claim it for processing (MAIN_PLAN §59). Returns the event when the caller
+-- should process it: a new event, or a redelivery of one that failed or whose processing stopped more than
+-- p_stale_seconds ago. Returns no row for a duplicate that is processed, ignored or still being processed.
+CREATE OR REPLACE FUNCTION claim_ingest_event(
+    p_business_id       uuid,
+    p_source            text,
+    p_external_event_id text,
+    p_event_type        text,
+    p_payload           jsonb,
+    p_stale_seconds     integer
+) RETURNS SETOF ingest_events
+LANGUAGE sql
+SET search_path = public
+AS $$
+    INSERT INTO ingest_events (business_id, source, external_event_id, event_type, payload)
+    VALUES (p_business_id, p_source, p_external_event_id, p_event_type, COALESCE(p_payload, '{}'))
+    ON CONFLICT (business_id, source, external_event_id) DO UPDATE
+        SET status = 'processing', attempts = ingest_events.attempts + 1, last_error = NULL, updated_at = now()
+        WHERE ingest_events.status = 'failed'
+           OR (ingest_events.status = 'processing'
+               AND ingest_events.updated_at < now() - make_interval(secs => p_stale_seconds))
+    RETURNING *;
+$$;
+
 -- Functions are executable by PUBLIC by default; ALTER DEFAULT PRIVILEGES in 003 does not remove that.
 REVOKE ALL ON FUNCTION save_lead(uuid, uuid, jsonb, jsonb, text)        FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION enqueue_analysis(uuid, uuid, text)               FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION claim_analysis_job(text, integer)                FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION try_lock_business(uuid, text, integer)           FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION claim_ingest_event(uuid, text, text, text, jsonb, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION save_lead(uuid, uuid, jsonb, jsonb, text)     TO service_role;
 GRANT EXECUTE ON FUNCTION enqueue_analysis(uuid, uuid, text)            TO service_role;
 GRANT EXECUTE ON FUNCTION claim_analysis_job(text, integer)             TO service_role;
 GRANT EXECUTE ON FUNCTION try_lock_business(uuid, text, integer)        TO service_role;
+GRANT EXECUTE ON FUNCTION claim_ingest_event(uuid, text, text, text, jsonb, integer) TO service_role;

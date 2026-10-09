@@ -52,3 +52,12 @@ export const FOLLOW_UP_REASON: Record<FollowUp['reason'], string> = {
   status: 'Status follow-up',
   interval: 'Regular follow-up',
 }
+
+// A duration in seconds for people: 45s, 12 min, 3.5 h, 2 d.
+export const formatDuration = (seconds: number | null) => {
+  if (seconds == null) return '—'
+  if (seconds < 90) return `${Math.round(seconds)}s`
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min`
+  if (seconds < 172_800) return `${(seconds / 3600).toFixed(1)} h`
+  return `${Math.round(seconds / 86_400)} d`
+}

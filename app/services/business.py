@@ -7,6 +7,7 @@ from postgrest.exceptions import APIError
 from app.core.errors import ConflictError, NotFoundError
 from app.core.logger import Logger
 from app.models import Business
+from app.presets import PRESETS
 from app.repositories import BusinessRepository
 from app.schemas import BusinessCreate
 from app.schemas.configuration import (
@@ -55,8 +56,32 @@ def _definitions_json(definitions: list[CustomFieldDefinition]) -> list[dict[str
     return [definition.model_dump(mode="json") for definition in definitions]
 
 
+def _with_preset(data: BusinessCreate) -> BusinessCreate:
+    """The request with its preset filling every part it left out."""
+    if data.preset is None:
+        return data
+    preset = PRESETS[data.preset]
+    given = data.model_fields_set
+    ai = data.ai_configuration
+    if ai.instructions is None:
+        ai = ai.model_copy(update={"instructions": preset.instructions})
+    if "tone" not in ai.model_fields_set:
+        ai = ai.model_copy(update={"tone": preset.tone})
+    return data.model_copy(
+        update={
+            "industry": data.industry or preset.industry,
+            "configuration": data.configuration if "configuration" in given else preset.configuration,
+            "custom_field_definitions": (
+                data.custom_field_definitions if "custom_field_definitions" in given else preset.custom_fields
+            ),
+            "ai_configuration": ai,
+        }
+    )
+
+
 def _to_values(data: BusinessCreate) -> dict[str, Any]:
     """Explicit field mapping: only these columns are client-settable (no mass assignment)."""
+    data = _with_preset(data)
     return {
         "name": data.name,
         "slug": data.slug,
@@ -82,7 +107,7 @@ class BusinessService:
             if exc.code != UNIQUE_VIOLATION:
                 raise
             raise _slug_taken(data.slug) from exc  # lost a race with a concurrent create of the same slug
-        logger.fire("business_created", business_id=str(business.id), slug=business.slug)
+        logger.fire("business_created", business_id=str(business.id), slug=business.slug, preset=data.preset)
         return business
 
     async def get(self, business_id: uuid.UUID) -> Business:

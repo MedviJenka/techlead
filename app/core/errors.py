@@ -28,6 +28,11 @@ class UnauthorizedError(DomainError):
     code = "unauthorized"
 
 
+class ForbiddenError(DomainError):
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "forbidden"
+
+
 class NotFoundError(DomainError):
     status_code = status.HTTP_404_NOT_FOUND
     code = "not_found"

@@ -15,6 +15,7 @@ import type {
   ScoringRule,
 } from '../api/types'
 import { inputClass, titleCase } from '../components/leadDisplay'
+import { WhatsAppSettings } from '../components/WhatsAppSettings'
 import { Button, Card, CardHeader, ErrorState, Icon, Skeleton, Stagger, Toast } from '../components/ui'
 
 // Mirrors FACT_NAMES in app/schemas/configuration.py.
@@ -321,6 +322,15 @@ function SettingsForm({ business }: { business: Business }) {
             <Field label="Closed statuses (comma-separated)" hint="Closed leads need no follow-up and are left out of open-lead counts.">
               <input className={inputClass} value={closed} onChange={(event) => setClosed(event.target.value)} />
             </Field>
+            <Field label="Country code for phone numbers" hint="Two letters, e.g. IL or US. Local numbers (050-…) are stored in international format for it.">
+              <input
+                className={`${inputClass} w-24 font-mono uppercase`}
+                value={config.phone_region ?? ''}
+                maxLength={2}
+                onChange={(event) => set('phone_region', event.target.value.trim().toUpperCase() || null)}
+                placeholder="IL"
+              />
+            </Field>
           </div>
         </Card>
       </div>
@@ -372,8 +382,9 @@ export function SettingsPage() {
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
           <Icon name="settings" /> Settings
         </h1>
-        <p className="text-ink-muted">How leads are scored, prioritized and followed up.</p>
+        <p className="text-ink-muted">Your WhatsApp number, and how leads are scored, prioritized and followed up.</p>
       </div>
+      <WhatsAppSettings businessId={businessId} />
       {business.isPending && <Skeleton className="h-96" />}
       {business.isError && <ErrorState message={business.error.message} onRetry={() => void business.refetch()} />}
       {business.data && <SettingsForm business={business.data} key={business.data.id} />}

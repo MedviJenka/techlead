@@ -50,6 +50,8 @@ export type BusinessConfiguration = {
     interval_hours: Record<PriorityName, number>
     status_interval_hours: Record<string, number>
   }
+  // ISO country code (e.g. "IL"): local phone numbers are stored in international format for it.
+  phone_region?: string | null
 }
 export type CustomFieldType = 'text' | 'number' | 'boolean' | 'date' | 'select'
 export type CustomFieldDefinition = { key: string; label: string; type: CustomFieldType; options: string[] }
@@ -63,6 +65,15 @@ export type BusinessCreate = {
   slug: string
   industry?: string | null
   timezone?: string
+  // An industry preset (GET /businesses/presets) fills custom fields, scoring and AI instructions.
+  preset?: string | null
+}
+export type Preset = {
+  key: string
+  label: string
+  industry: string
+  description: string
+  custom_field_definitions: CustomFieldDefinition[]
 }
 
 export type Page<T> = {
@@ -175,6 +186,12 @@ export type Dashboard = {
   by_source: Bucket[]
   by_status: Bucket[]
   by_score: Bucket[]
+  responses: {
+    median_first_response_seconds: number | null
+    responded: number
+    without_response: number
+    pending_approvals: number
+  }
   recent_activity: (Omit<Activity, 'metadata'> & { lead_name: string | null })[]
   top_leads: Lead[]
   generated_at: string
@@ -191,4 +208,32 @@ export type ImportResult = {
     lead_id: string | null
     errors: { loc: (string | number)[]; msg: string; type: string }[] | null
   }[]
+}
+
+// app/schemas/reply.py: AI-drafted replies the owner approves, edits or rejects.
+export type ReplyDraftStatus = 'pending_approval' | 'awaiting_edit' | 'sending' | 'sent' | 'rejected' | 'failed'
+export type ReplyDraft = {
+  id: string
+  lead_id: string
+  channel: string
+  message: string
+  objective: string | null
+  status: ReplyDraftStatus
+  edited: boolean
+  decided_via: 'whatsapp' | 'dashboard' | null
+  last_error: string | null
+  created_at: string
+  decided_at: string | null
+  sent_at: string | null
+  lead_name?: string | null
+}
+export type WhatsAppConnection = {
+  phone_number_id: string
+  display_phone?: string | null
+  owner_phone: string
+}
+export type WhatsAppStatus = {
+  connection: (Required<WhatsAppConnection> & { updated_at: string }) | null
+  configured: boolean
+  webhook_path: string
 }

@@ -3,9 +3,11 @@ import { Link, useParams } from 'react-router'
 
 import { useBusiness } from '../api/hooks'
 import { useDashboard } from '../api/leads'
+import { usePendingReplies, useWhatsApp } from '../api/replies'
 import type { Bucket, Dashboard, Lead } from '../api/types'
 import { LeadTable } from '../components/Leads'
-import { daysSince, leadName, relativeTime, titleCase } from '../components/leadDisplay'
+import { ReplyDraftCard } from '../components/Replies'
+import { daysSince, formatDuration, leadName, relativeTime, titleCase } from '../components/leadDisplay'
 import { AnimatedNumber, Avatar, Card, CardHeader, EmptyState, ErrorState, Icon, PriorityFlag, Reveal, ScoreMeter, Skeleton, Stagger } from '../components/ui'
 import { fadeUp, spring } from '../components/motion'
 
@@ -105,6 +107,75 @@ function TodayStrip({ businessId, leads }: { businessId: string; leads: Lead[] }
           )
         })}
       </Stagger>
+    </Reveal>
+  )
+}
+
+function ResponseStrip({ businessId, responses }: { businessId: string; responses: Dashboard['responses'] }) {
+  const whatsapp = useWhatsApp(businessId)
+  const pending = usePendingReplies(businessId)
+  const tiles = [
+    {
+      label: 'Time to first response',
+      value: formatDuration(responses.median_first_response_seconds),
+      hint: `Median over ${responses.responded} answered lead${responses.responded === 1 ? '' : 's'}.`,
+      icon: 'timer',
+      alert: (responses.median_first_response_seconds ?? 0) > 3600,
+    },
+    {
+      label: 'Leads with no response',
+      value: String(responses.without_response),
+      hint: 'Open leads nobody has messaged or called yet.',
+      icon: 'mark_chat_unread',
+      alert: responses.without_response > 0,
+    },
+    {
+      label: 'Replies to approve',
+      value: String(responses.pending_approvals),
+      hint: 'AI-drafted replies waiting for you (also sent to your WhatsApp).',
+      icon: 'approval',
+      alert: responses.pending_approvals > 0,
+    },
+  ]
+  const drafts = pending.data ?? []
+  return (
+    <Reveal className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-[15px] font-bold">First response</h2>
+        <span className="font-mono text-[11px] text-ink-subtle">how fast leads hear back</span>
+      </div>
+      {whatsapp.data && !whatsapp.data.connection && (
+        <Link
+          to={`/businesses/${businessId}/settings#whatsapp`}
+          className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary-soft px-4 py-3 text-[13px] text-primary hover:underline"
+        >
+          <Icon name="chat" />
+          Connect your WhatsApp number to answer new leads within a minute.
+          <Icon name="arrow_forward" className="ml-auto" />
+        </Link>
+      )}
+      <div className="grid gap-3 sm:grid-cols-3">
+        {tiles.map((tile) => (
+          <div key={tile.label} className={`rounded-md border bg-surface p-4 ${tile.alert ? 'border-hot/30' : 'border-line'}`} title={tile.hint}>
+            <span className="flex items-center justify-between text-[13px] text-ink-muted">
+              {tile.label}
+              <Icon name={tile.icon} className={tile.alert ? 'text-hot' : 'text-ink-subtle'} />
+            </span>
+            <span className={`mt-2 block text-[28px] leading-none font-medium ${tile.alert ? 'text-hot' : ''}`}>{tile.value}</span>
+            <span className="mt-2 block truncate text-xs text-ink-subtle">{tile.hint}</span>
+          </div>
+        ))}
+      </div>
+      {drafts.length > 0 && (
+        <Card className="overflow-hidden">
+          <CardHeader title="Replies waiting for you" icon="approval" />
+          <div className="divide-y divide-line">
+            {drafts.map((draft) => (
+              <ReplyDraftCard key={draft.id} businessId={businessId} draft={draft} leadName={draft.lead_name ?? 'Open lead'} />
+            ))}
+          </div>
+        </Card>
+      )}
     </Reveal>
   )
 }
@@ -302,6 +373,8 @@ export function BusinessPage() {
       {data && (
         <Stagger className="space-y-6" step={0.08}>
           <TodayStrip businessId={businessId} leads={data.top_leads} />
+
+          <ResponseStrip businessId={businessId} responses={data.responses} />
 
           <Stagger className="grid grid-cols-2 gap-3 lg:grid-cols-4" step={0.04}>
             {KPIS.map((kpi) => (

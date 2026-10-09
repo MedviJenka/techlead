@@ -5,10 +5,27 @@ from fastapi import APIRouter, Depends, status
 from app.api.deps import AccountServiceDep, BusinessServiceDep, require_business_access
 from app.core.auth import CurrentUser
 from app.models import Business
+from app.presets import PRESETS
 from app.schemas import BusinessCreate, BusinessRead
+from app.schemas.business import PresetRead
 from app.schemas.configuration import BusinessSettingsUpdate
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
+
+
+@router.get("/presets", response_model=list[PresetRead])
+async def list_presets() -> list[PresetRead]:
+    """Industry presets a new business can start from (``preset`` in ``POST /businesses``)."""
+    return [
+        PresetRead(
+            key=preset.key,
+            label=preset.label,
+            industry=preset.industry,
+            description=preset.description,
+            custom_field_definitions=preset.custom_fields,
+        )
+        for preset in PRESETS.values()
+    ]
 
 
 @router.post("", response_model=BusinessRead, status_code=status.HTTP_201_CREATED)

@@ -10,9 +10,12 @@ ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE analysis_jobs  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE business_locks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whatsapp_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ingest_events     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reply_drafts      ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON TABLE businesses, leads, activities, users, analysis_jobs, business_locks FROM anon, authenticated;
-GRANT ALL ON TABLE businesses, leads, activities, users, analysis_jobs, business_locks TO service_role;
+REVOKE ALL ON TABLE businesses, leads, activities, users, analysis_jobs, business_locks, whatsapp_accounts, ingest_events, reply_drafts FROM anon, authenticated;
+GRANT ALL ON TABLE businesses, leads, activities, users, analysis_jobs, business_locks, whatsapp_accounts, ingest_events, reply_drafts TO service_role;
 
 -- Tables created later in `public` start closed too.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES    FROM anon, authenticated;

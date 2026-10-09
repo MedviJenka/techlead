@@ -7,10 +7,11 @@ types the keys of `leads.custom_fields`. Every section has defaults, so a busine
 import re
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
 
 from ai.schemas.enums import Priority
 from app.core.logger import Logger
+from app.ingestion.normalize import is_phone_region
 
 logger = Logger(__name__)
 
@@ -174,6 +175,18 @@ class BusinessConfiguration(_Strict):
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     priority: PriorityThresholds = Field(default_factory=PriorityThresholds)
     follow_up: FollowUpConfig = Field(default_factory=FollowUpConfig)
+    # The business's country (ISO 3166 alpha-2, e.g. "IL"): national phone numbers are stored in E.164 for it.
+    phone_region: str | None = None
+
+    @field_validator("phone_region")
+    @classmethod
+    def _known_region(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        region = value.strip().upper()
+        if not is_phone_region(region):
+            raise ValueError(f"unknown country code: {value}")
+        return region
 
     @classmethod
     def from_stored(cls, value: Any) -> "BusinessConfiguration":

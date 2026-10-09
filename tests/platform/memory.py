@@ -1,14 +1,30 @@
 """In-memory stand-ins for the Supabase repositories, for service tests that need no database."""
 
 import uuid
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from ai.schemas.enums import ActivityType
+from app.channels.whatsapp import Button, WhatsAppSendError
 from app.core.locks import LocalBusinessLock
-from app.models import Activity, AnalysisJob, AnalysisJobStatus, AnalysisTrigger, Business, Lead
+from app.models import (
+    Activity,
+    AnalysisJob,
+    AnalysisJobStatus,
+    AnalysisTrigger,
+    Business,
+    IngestEvent,
+    IngestStatus,
+    Lead,
+    ReplyDraft,
+    ReplyDraftStatus,
+    WhatsAppAccount,
+)
+from app.models.reply_draft import OPEN_DRAFT_STATUSES
 from app.services.lead import LeadService
+from app.services.replies import ApprovalTemplate, ReplyService
 
 NOW = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
 
@@ -112,6 +128,9 @@ class FakeStore:
     async def get(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> Lead | None:
         return self.leads.get(lead_id)
 
+    async def get_many(self, business_id: uuid.UUID, lead_ids: list[uuid.UUID]) -> list[Lead]:
+        return [self.leads[lead_id] for lead_id in lead_ids if lead_id in self.leads]
+
     async def get_by_external_id(self, business_id: uuid.UUID, source: str, external_id: str) -> Lead | None:
         return next(
             (lead for lead in self.leads.values() if (lead.source, lead.external_id) == (source, external_id)), None
@@ -181,6 +200,9 @@ class FakeStore:
     async def all_for_business(self, business_id: uuid.UUID) -> list[Activity]:
         return list(self.activities)
 
+    async def has_message(self, business_id: uuid.UUID, message_id: str) -> bool:
+        return any(a.metadata.get("message_id") == message_id for a in self.activities)
+
     def types(self, lead_id: uuid.UUID) -> list[ActivityType]:
         return [activity.activity_type for activity in self.activities if activity.lead_id == lead_id]
 
@@ -213,3 +235,174 @@ def make_service(business: Business, store: FakeStore) -> LeadService:
     service.jobs = store.jobs  # type: ignore[assignment]
     service.lock = LocalBusinessLock()
     return service
+
+
+class FakeDrafts:
+    """ReplyDraftRepository, with the same one-undecided-draft-per-lead rule as ``uq_reply_drafts_open_lead``."""
+
+    _UNDECIDED = OPEN_DRAFT_STATUSES | {ReplyDraftStatus.SENDING}
+
+    def __init__(self) -> None:
+        self.drafts: list[ReplyDraft] = []
+
+    async def add(self, values: dict[str, Any]) -> ReplyDraft | None:
+        if any(d.lead_id == values["lead_id"] and d.status in self._UNDECIDED for d in self.drafts):
+            return None
+        draft = ReplyDraft.model_validate(
+            {
+                "id": uuid.uuid4(), "status": ReplyDraftStatus.PENDING_APPROVAL, "edited": False, "decided_via": None,
+                "approval_message_id": None, "sent_message_id": None, "last_error": None, "created_at": NOW,
+                "updated_at": NOW, "decided_at": None, "sent_at": None,
+            }
+            | values
+        )
+        self.drafts.append(draft)
+        return draft
+
+    async def get(self, business_id: uuid.UUID, draft_id: uuid.UUID) -> ReplyDraft | None:
+        return next((d for d in self.drafts if d.id == draft_id and d.business_id == business_id), None)
+
+    async def with_status(
+        self, business_id: uuid.UUID, statuses: Collection[ReplyDraftStatus], limit: int
+    ) -> list[ReplyDraft]:
+        matches = [d for d in reversed(self.drafts) if d.business_id == business_id and d.status in statuses]
+        return matches[:limit]
+
+    async def count(self, business_id: uuid.UUID, statuses: Collection[ReplyDraftStatus]) -> int:
+        return len(await self.with_status(business_id, statuses, len(self.drafts)))
+
+    async def for_lead(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> list[ReplyDraft]:
+        return [d for d in reversed(self.drafts) if d.business_id == business_id and d.lead_id == lead_id]
+
+    async def awaiting_edit(self, business_id: uuid.UUID) -> ReplyDraft | None:
+        drafts = await self.with_status(business_id, [ReplyDraftStatus.AWAITING_EDIT], 1)
+        return drafts[0] if drafts else None
+
+    async def transition(
+        self, draft: ReplyDraft, from_statuses: Collection[ReplyDraftStatus], values: dict[str, Any]
+    ) -> ReplyDraft | None:
+        current = await self.get(draft.business_id, draft.id)
+        if current is None or current.status not in from_statuses:
+            return None
+        updated = current.model_copy(update=values)
+        self.drafts[self.drafts.index(current)] = updated
+        return updated
+
+    def only(self) -> ReplyDraft:
+        assert len(self.drafts) == 1, self.drafts
+        return self.drafts[0]
+
+
+class FakeAccounts:
+    def __init__(self, *accounts: WhatsAppAccount) -> None:
+        self.accounts = {account.business_id: account for account in accounts}
+
+    async def get(self, business_id: uuid.UUID) -> WhatsAppAccount | None:
+        return self.accounts.get(business_id)
+
+    async def get_by_phone_number_id(self, phone_number_id: str) -> WhatsAppAccount | None:
+        return next((a for a in self.accounts.values() if a.phone_number_id == phone_number_id), None)
+
+    async def save(self, business_id: uuid.UUID, values: dict[str, Any]) -> WhatsAppAccount:
+        account = WhatsAppAccount.model_validate(
+            {"business_id": business_id, "created_at": NOW, "updated_at": NOW, "display_phone": None} | values
+        )
+        self.accounts[business_id] = account
+        return account
+
+    async def delete(self, business_id: uuid.UUID) -> None:
+        self.accounts.pop(business_id, None)
+
+
+class FakeEvents:
+    """IngestEventRepository with the claim_ingest_event rules (stale processing events are not modelled)."""
+
+    def __init__(self) -> None:
+        self.events: dict[tuple[uuid.UUID, str, str], IngestEvent] = {}
+
+    async def claim(
+        self,
+        business_id: uuid.UUID,
+        source: str,
+        external_event_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        stale_seconds: int = 300,
+    ) -> IngestEvent | None:
+        key = (business_id, source, external_event_id)
+        if (event := self.events.get(key)) is not None:
+            if event.status is not IngestStatus.FAILED:
+                return None
+            event = event.model_copy(update={"status": IngestStatus.PROCESSING, "attempts": event.attempts + 1})
+        else:
+            event = IngestEvent(
+                id=uuid.uuid4(), business_id=business_id, source=source, external_event_id=external_event_id,
+                event_type=event_type, status=IngestStatus.PROCESSING, attempts=1, payload=payload, last_error=None,
+                created_at=NOW, updated_at=NOW, processed_at=None,
+            )
+        self.events[key] = event
+        return event
+
+    async def finish(self, event: IngestEvent, status: IngestStatus, error: str | None = None) -> None:
+        key = (event.business_id, event.source, event.external_event_id)
+        self.events[key] = self.events[key].model_copy(update={"status": status, "last_error": error})
+
+    def statuses(self) -> list[IngestStatus]:
+        return [event.status for event in self.events.values()]
+
+
+class FakeSender:
+    """Records what would be sent. ``fail[method]`` raises that error on the next call of ``method``."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, str, Any]] = []  # (method, to, text, extra)
+        self.fail: dict[str, WhatsAppSendError] = {}
+
+    def _record(self, method: str, to: str, text: str, extra: Any = None) -> str:
+        if (error := self.fail.pop(method, None)) is not None:
+            raise error
+        self.sent.append((method, to, text, extra))
+        return f"wamid.{len(self.sent)}"
+
+    async def send_text(self, phone_number_id: str, to: str, body: str) -> str:
+        return self._record("text", to, body)
+
+    async def send_buttons(self, phone_number_id: str, to: str, body: str, buttons: Sequence[Button]) -> str:
+        return self._record("buttons", to, body, [b.id for b in buttons])
+
+    async def send_template(
+        self,
+        phone_number_id: str,
+        to: str,
+        name: str,
+        language: str,
+        body_params: Sequence[str],
+        button_payloads: Sequence[str] = (),
+    ) -> str:
+        return self._record("template", to, name, (list(body_params), list(button_payloads)))
+
+    def to(self, phone: str) -> list[str]:
+        return [text for _, to, text, _ in self.sent if to == phone]
+
+
+OWNER_PHONE = "+972501111111"
+PHONE_NUMBER_ID = "1098765432"
+
+
+def make_account(business: Business) -> WhatsAppAccount:
+    return WhatsAppAccount(
+        business_id=business.id, phone_number_id=PHONE_NUMBER_ID, display_phone="+972500000000",
+        owner_phone=OWNER_PHONE, created_at=NOW, updated_at=NOW,
+    )
+
+
+def make_replies(
+    service: LeadService,
+    accounts: FakeAccounts,
+    sender: FakeSender | None = None,
+    template: ApprovalTemplate | None = None,
+) -> ReplyService:
+    replies = ReplyService(None, service, sender or FakeSender(), template, NOW)  # type: ignore[arg-type]
+    replies.drafts = FakeDrafts()  # type: ignore[assignment]
+    replies.accounts = accounts  # type: ignore[assignment]
+    return replies

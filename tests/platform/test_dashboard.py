@@ -132,3 +132,29 @@ def test_follow_up_and_closed_statuses_follow_the_configuration() -> None:
 
     config.follow_up.interval_hours[Priority.LOW] = 72
     assert summarize([contacted, done], [], NOW, config).counts.needs_follow_up == 1
+
+
+def test_response_metrics_time_to_first_response_and_unanswered_leads() -> None:
+    answered_fast = _lead(0)
+    answered_slow = _lead(0)
+    unanswered = _lead(30)
+    closed = _lead(30, status="lost")
+    first_responses = {answered_fast.id: _at(1), answered_slow.id: _at(10)}
+
+    summary = summarize(
+        [answered_fast, answered_slow, unanswered, closed], [], NOW, first_responses=first_responses,
+        pending_approvals=2,
+    )
+
+    # Median of 60s and 600s; the closed lead never counts as waiting.
+    assert summary.responses.model_dump() == {
+        "median_first_response_seconds": 330.0,
+        "responded": 2,
+        "without_response": 1,
+        "pending_approvals": 2,
+    }
+
+
+def test_response_metrics_without_any_response() -> None:
+    summary = summarize([_lead(0)], [], NOW)
+    assert (summary.responses.median_first_response_seconds, summary.responses.without_response) == (None, 1)
