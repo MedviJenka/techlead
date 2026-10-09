@@ -1,8 +1,10 @@
 """End-to-end crew runs with a scripted LLM: wiring, structured outputs and guardrail retries."""
 
+import gc
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from crewai.project.utils import cache as memo_cache
 
 from ai.crews import ConversationCrew, LeadIntelligenceCrew, ManagementCrew, SalesAssistantFlow
 from ai.data.sample_store import InMemoryLeadStore
@@ -157,3 +159,31 @@ class TestManagementCrew:
         assert answer == grounded
         assert flow.state.leads and all(lead.lead_score >= 80 for lead in flow.state.leads)
         assert llm.calls == ["interpret_question_task", "explain_results_task"]
+
+
+class TestAgentCache:
+    """CrewAI memoizes @agent/@task results in a process-wide cache keyed by the crew's id()."""
+
+    def test_released_crew_leaves_nothing_in_the_cache(self, store: InMemoryLeadStore) -> None:
+        crew = make_crew(ConversationCrew, store, ScriptedLLM({}))
+        crew.followup_agent()
+        key = f"('__instance__', {id(crew)})"
+        assert any(key in entry for entry in crewai_memo_cache())
+
+        del crew
+        gc.collect()
+
+        assert not any(key in entry for entry in crewai_memo_cache())
+
+    def test_new_crew_never_gets_a_released_crews_agent(self, store: InMemoryLeadStore) -> None:
+        """A freed id is reused by the next crew; it must build its own agent, not get the old one's LLM and tools."""
+        for _ in range(50):
+            llm = ScriptedLLM({})
+            crew = make_crew(ConversationCrew, store, llm)
+            assert crew.followup_agent().llm is llm
+            del crew
+            gc.collect()
+
+
+def crewai_memo_cache() -> list[str]:
+    return list(memo_cache._cache)

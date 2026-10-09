@@ -1,3 +1,4 @@
+import weakref
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -7,6 +8,7 @@ from typing import Any, Self
 
 from crewai import Agent, Crew, CrewOutput, Memory, Process, Task
 from crewai.agents.agent_builder.base_agent import BaseAgent
+from crewai.project.utils import cache as memo_cache
 from pydantic import BaseModel
 
 from ai.config import LLMResolver, LLMSettings
@@ -69,6 +71,7 @@ class BusinessCrew:
         self.business = business
         self.runtime = runtime
         self._memory_keys: set[MemoryKey] = set()
+        weakref.finalize(self, _forget_memoized, id(self))
 
     @classmethod
     def for_business(cls, runtime: AIRuntime, business_id: str) -> Self:
@@ -161,6 +164,19 @@ def task_result[M: BaseModel](output: CrewOutput, model: type[M]) -> M:
             return task_output.pydantic
     logger.fire("crew_output_missing", level="error", model=model.__name__)
     raise CrewExecutionError(f"Crew produced no {model.__name__}")
+
+
+def _forget_memoized(crew_id: int) -> None:
+    """Drop a released crew's @agent/@task results from CrewAI's process-wide memo cache.
+
+    CrewAI keys that cache by the crew's id(). Without this, the next crew allocated at the same address (any
+    business, in the long-running worker) would get the old crew's agents with their tools and memory, and the
+    cache would grow with every crew built.
+    """
+    marker = f"('__instance__', {crew_id})"
+    with memo_cache._lock.w_locked():
+        for key in [key for key in memo_cache._cache if marker in key]:
+            del memo_cache._cache[key]
 
 
 @cache
