@@ -4,7 +4,7 @@ from httpx import HTTPError
 from postgrest.exceptions import APIError
 
 from app.api.deps import SupabaseDep
-from app.core.logging import Logger
+from app.core.logger import Logger
 from app.schemas import HealthStatus
 
 router = APIRouter(tags=["health"])

@@ -5,7 +5,7 @@ from typing import Any
 from postgrest.exceptions import APIError
 
 from app.core.errors import ConflictError, NotFoundError
-from app.core.logging import Logger
+from app.core.logger import Logger
 from app.models import Business
 from app.repositories import BusinessRepository
 from app.schemas import BusinessCreate

@@ -9,7 +9,7 @@ from functools import cache
 from typing import TYPE_CHECKING, Protocol
 
 from ai.schemas import ActivitySnapshot, BusinessProfile, LeadSnapshot
-from app.core.logging import Logger
+from app.core.logger import Logger
 
 if TYPE_CHECKING:
     from ai.config import LLMResolver

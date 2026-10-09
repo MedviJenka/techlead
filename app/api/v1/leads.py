@@ -19,9 +19,7 @@ router = APIRouter(prefix="/businesses/{business_id}", tags=["leads"])
 
 @router.get("/leads", response_model=Page[LeadListItem])
 async def list_leads(
-    business_id: uuid.UUID,
-    service: LeadServiceDep,
-    params: Annotated[LeadListParams, Query()],
+    business_id: uuid.UUID, service: LeadServiceDep, params: Annotated[LeadListParams, Query()]
 ) -> Page[LeadListItem]:
     return await service.list(business_id, params)
 
@@ -79,8 +77,6 @@ async def lead_activities(
 
 @router.get("/dashboard", response_model=DashboardSummary)
 async def dashboard(
-    business_id: uuid.UUID,
-    service: DashboardServiceDep,
-    now: Annotated[datetime, Depends(utc_now)],
+    business_id: uuid.UUID, service: DashboardServiceDep, now: Annotated[datetime, Depends(utc_now)]
 ) -> DashboardSummary:
     return await service.summary(business_id, now)
