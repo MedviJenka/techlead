@@ -1,4 +1,7 @@
 import uuid
+from collections.abc import Collection
+from datetime import datetime
+from typing import Any, cast
 
 from postgrest import CountMethod
 from supabase import AsyncClient
@@ -63,6 +66,43 @@ class ActivityRepository:
             .execute()
         )
         return Activity.model_validate(response.data[0]) if response.data else None
+
+    async def has_message(self, business_id: uuid.UUID, message_id: str) -> bool:
+        """Whether a channel message (``metadata.message_id``, e.g. a WhatsApp ``wamid``) is already recorded."""
+        response = (
+            await self._db.table("activities")
+            .select("id")
+            .eq("business_id", str(business_id))
+            .eq("metadata->>message_id", message_id)
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data)
+
+    async def first_of_types(
+        self, business_id: uuid.UUID, activity_types: Collection[ActivityType]
+    ) -> dict[uuid.UUID, datetime]:
+        """When each lead first had an activity of ``activity_types`` (e.g. its first outbound contact)."""
+        firsts: dict[uuid.UUID, datetime] = {}
+        types = [activity_type.value for activity_type in activity_types]
+        fetched = 0
+        while True:
+            response = (
+                await self._db.table("activities")
+                .select("lead_id,created_at")
+                .eq("business_id", str(business_id))
+                .in_("activity_type", types)
+                .order("created_at")
+                .order("id")
+                .range(fetched, fetched + _MAX_ROWS - 1)
+                .execute()
+            )
+            for row in cast(list[dict[str, Any]], response.data):
+                lead_id = uuid.UUID(row["lead_id"])
+                firsts.setdefault(lead_id, datetime.fromisoformat(row["created_at"]))
+            fetched += len(response.data)
+            if len(response.data) < _MAX_ROWS:
+                return firsts
 
     async def all_for_lead(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> list[Activity]:
         """Every activity of one lead, chronological."""

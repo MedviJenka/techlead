@@ -12,7 +12,21 @@ import pytest
 from pydantic import BaseModel
 
 from ai.schemas.enums import ActivityType, Channel, Priority, Sentiment
-from app.models import Activity, AnalysisJob, AnalysisJobStatus, AnalysisTrigger, Business, Lead, User
+from app.models import (
+    Activity,
+    AnalysisJob,
+    AnalysisJobStatus,
+    AnalysisTrigger,
+    Business,
+    DecisionChannel,
+    IngestEvent,
+    IngestStatus,
+    Lead,
+    ReplyDraft,
+    ReplyDraftStatus,
+    User,
+    WhatsAppAccount,
+)
 from tests.platform.conftest import ROOT
 
 SQL = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "db").glob("*.sql")))
@@ -27,6 +41,10 @@ ENUM_CHECKS = [
     ("ck_users_user_role", USER_ROLES),
     ("ck_analysis_jobs_analysis_job_status", {member.value for member in AnalysisJobStatus}),
     ("ck_analysis_jobs_analysis_trigger", {member.value for member in AnalysisTrigger}),
+    ("ck_ingest_events_ingest_status", {member.value for member in IngestStatus}),
+    ("ck_reply_drafts_reply_draft_status", {member.value for member in ReplyDraftStatus}),
+    ("ck_reply_drafts_reply_channel", {member.value for member in Channel}),
+    ("ck_reply_drafts_decision_channel", {member.value for member in DecisionChannel}),
 ]
 
 
@@ -48,7 +66,13 @@ def test_check_constraint_allows_exactly_the_enum_values(constraint: str, values
     assert _check_values(constraint) == values
 
 
-@pytest.mark.parametrize("enum", [Priority, Sentiment, ActivityType, Channel, AnalysisJobStatus, AnalysisTrigger])
+@pytest.mark.parametrize(
+    "enum",
+    [
+        Priority, Sentiment, ActivityType, Channel, AnalysisJobStatus, AnalysisTrigger, IngestStatus, ReplyDraftStatus,
+        DecisionChannel,
+    ],
+)
 def test_enum_values_fit_the_column(enum: type[StrEnum]) -> None:
     assert all(len(member.value) <= ENUM_COLUMN_LENGTH for member in enum)
 
@@ -60,6 +84,9 @@ def test_enum_values_fit_the_column(enum: type[StrEnum]) -> None:
         ("activities", Activity),
         ("users", User),
         ("analysis_jobs", AnalysisJob),
+        ("whatsapp_accounts", WhatsAppAccount),
+        ("ingest_events", IngestEvent),
+        ("reply_drafts", ReplyDraft),
     ]
 )
 def test_table_columns_match_the_model(table: str, model: type[BaseModel]) -> None:

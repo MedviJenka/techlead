@@ -4,7 +4,8 @@ Each ``normalize_*`` function raises ``ValueError`` on invalid input, so used as
 as ordinary validation errors (422 on the API, a ``failed`` record on import). The ``Annotated`` aliases below are
 the only way schemas should apply them, which keeps API input and imported data byte-for-byte identical.
 
-Deliberately dependency-free: no ``email-validator`` / ``phonenumbers`` (recorded in TECH_DEBT).
+Phones are E.164 (MAIN_PLAN §7): international input is validated with ``phonenumbers``; a national number
+(no ``+``) needs the business's country and is converted by ``to_e164`` in the lead service.
 """
 
 import re
@@ -12,6 +13,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated
 
+import phonenumbers
 from pydantic import AfterValidator, BeforeValidator, Field, Strict, StringConstraints
 
 from ai.schemas.enums import Priority, Sentiment
@@ -47,14 +49,47 @@ def normalize_email(value: str) -> str:
 
 
 def normalize_phone(value: str) -> str:
-    """Keep one optional leading ``+`` and the digits: ``"+972 50-123-4567"`` -> ``"+972501234567"``."""
+    """International numbers in E.164 (``"+972 50-123-4567"`` -> ``"+972501234567"``); national ones as digits.
+
+    A ``+`` number must be a possible number of its country. A national number (``"050-123-4567"`` ->
+    ``"0501234567"``) is kept as digits until ``to_e164`` reads it in the business's country.
+    """
     compact = _PHONE_SEPARATORS.sub("", value)
     digits = compact.removeprefix("+")
     if not digits.isascii() or not digits.isdigit():
         raise ValueError("phone may contain only digits, spaces, '-', '.', '(', ')' and one leading '+'")
     if not PHONE_MIN_DIGITS <= len(digits) <= PHONE_MAX_DIGITS:
         raise ValueError(f"phone must have {PHONE_MIN_DIGITS}-{PHONE_MAX_DIGITS} digits")
+    if compact.startswith("+"):
+        e164 = _possible_e164(compact, None)
+        if e164 is None:
+            raise ValueError("phone is not a possible international number")
+        return e164
     return compact
+
+
+def _possible_e164(phone: str, region: str | None) -> str | None:
+    try:
+        parsed = phonenumbers.parse(phone, region)
+    except phonenumbers.NumberParseException:
+        return None
+    if not phonenumbers.is_possible_number(parsed):
+        return None
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
+def to_e164(phone: str, region: str | None) -> str:
+    """A normalized phone in E.164: a national number is read in ``region`` (ISO 3166 alpha-2, the business's
+    country). Unchanged when it is already international, there is no region, or it is not a number there.
+    """
+    if phone.startswith("+") or region is None:
+        return phone
+    return _possible_e164(phone, region) or phone
+
+
+def is_phone_region(value: str) -> bool:
+    """An ISO 3166 alpha-2 country code ``phonenumbers`` knows (``"IL"``, ``"US"``)."""
+    return value in phonenumbers.SUPPORTED_REGIONS
 
 
 def normalize_token(value: str) -> str:

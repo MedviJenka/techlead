@@ -10,6 +10,8 @@ from datetime import datetime
 
 from app.analysis import CrewAnalysisEngine, missing_ai_configuration, reasoning_model
 from app.analysis.cost import TokenPrices
+from app.analysis.drafting import CrewReplyDrafter
+from app.analysis.first_reply import FirstReply
 from app.analysis.flow import NewLeadFlow
 from app.core.clock import utc_now
 from app.core.locks import PROCESS_ID
@@ -17,6 +19,7 @@ from app.core.logger import Logger, configure_logging
 from app.core.supabase import get_supabase
 from app.repositories.analysis_job import AnalysisJobRepository
 from app.services.lead import LeadService
+from app.services.replies import ApprovalTemplate, ReplyService, whatsapp_sender
 from app.worker.runner import AnalysisWorker
 from settings import get_config
 
@@ -30,11 +33,14 @@ async def main() -> int:
         logger.fire("worker_not_configured", level="error", reason=problem)
         return 2
     db = await get_supabase()
-    engine = CrewAnalysisEngine()
+    engine, drafter = CrewAnalysisEngine(), CrewReplyDrafter()
     model, prices = reasoning_model(config), TokenPrices.from_settings(config)
+    sender, template = whatsapp_sender(config), ApprovalTemplate.from_settings(config)
 
     def make_flow(now: datetime) -> NewLeadFlow:
-        return NewLeadFlow(LeadService(db, now), engine, model, prices)
+        leads = LeadService(db, now)
+        replies = ReplyService(db, leads, sender, template, now)
+        return NewLeadFlow(leads, engine, model, prices, FirstReply(leads, replies, drafter, utc_now))
 
     worker = AnalysisWorker(AnalysisJobRepository(db), make_flow, utc_now, name=f"worker:{PROCESS_ID}")
     stop = asyncio.Event()

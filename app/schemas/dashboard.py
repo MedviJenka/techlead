@@ -20,6 +20,18 @@ class DashboardCounts(BaseModel):
     average_score: float | None
 
 
+class ResponseMetrics(BaseModel):
+    """How fast leads hear back (MAIN_PLAN §66). A response is an outbound message or call recorded here."""
+
+    # Median time from a lead's arrival to its first response, over the leads that got one.
+    median_first_response_seconds: float | None
+    responded: int
+    # Open leads nobody has answered yet.
+    without_response: int
+    # Drafted replies waiting for the owner's decision.
+    pending_approvals: int
+
+
 class Bucket(BaseModel):
     key: str
     count: int
@@ -37,6 +49,7 @@ class RecentActivity(BaseModel):
 
 class DashboardSummary(BaseModel):
     counts: DashboardCounts
+    responses: ResponseMetrics
     by_source: list[Bucket]
     by_status: list[Bucket]
     by_score: list[Bucket]

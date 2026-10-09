@@ -52,6 +52,18 @@ class BusinessCreate(BaseModel):
         default_factory=list, max_length=MAX_CUSTOM_FIELD_DEFINITIONS
     )
     ai_configuration: AIConfigurationInput = Field(default_factory=AIConfigurationInput)
+    # An industry preset (``app.presets``, e.g. "real_estate") fills what the request leaves out: the industry,
+    # configuration, custom fields and AI instructions.
+    preset: str | None = None
+
+    @field_validator("preset")
+    @classmethod
+    def _known_preset(cls, value: str | None) -> str | None:
+        from app.presets import PRESETS  # lazy: app.presets builds its presets from these schemas
+
+        if value is not None and value not in PRESETS:
+            raise ValueError(f"unknown preset: {value} (one of: {', '.join(sorted(PRESETS))})")
+        return value
 
     @field_validator("timezone")
     @classmethod
@@ -80,3 +92,13 @@ class BusinessRead(BaseModel):
     ai_configuration: AIConfiguration
     created_at: datetime
     updated_at: datetime
+
+
+class PresetRead(BaseModel):
+    """An industry preset a new business can start from (``BusinessCreate.preset``)."""
+
+    key: str
+    label: str
+    industry: str
+    description: str
+    custom_field_definitions: list[CustomFieldDefinition]

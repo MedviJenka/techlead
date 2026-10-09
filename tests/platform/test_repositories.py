@@ -35,15 +35,15 @@ async def test_get_is_tenant_scoped(db: AsyncClient) -> None:
 
 async def test_dedup_lookups(db: AsyncClient) -> None:
     acme, other = await make_business(db, "acme"), await make_business(db, "other")
-    newer = await _lead(db, acme, 10, email="a@x.com", phone="+1234567")
-    older = await _lead(db, acme, 5, email="a@x.com", phone="+1234567", external_id="e-1")
+    newer = await _lead(db, acme, 10, email="a@x.com", phone="+12025550143")
+    older = await _lead(db, acme, 5, email="a@x.com", phone="+12025550143", external_id="e-1")
     await _lead(db, other, 0, email="a@x.com", external_id="e-1")
     repo = LeadRepository(db)
 
     assert await repo.get_by_external_id(acme.id, "website", "e-1") == older
     assert await repo.get_by_external_id(acme.id, "email", "e-1") is None
     assert await repo.get_oldest_by_email(acme.id, "a@x.com") == older
-    assert await repo.get_oldest_by_phone(acme.id, "+1234567") == older
+    assert await repo.get_oldest_by_phone(acme.id, "+12025550143") == older
     assert newer != older
 
 

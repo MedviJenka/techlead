@@ -3,6 +3,7 @@
     Lead saved → qualification → AI scoring → next action    (LeadIntelligenceCrew: one run, tasks share context)
                → deterministic scoring → final score → priority   (LeadService.record_analysis, under the lock)
                → priority route
+               → first reply drafted, sent to the owner for approval  (FirstReply: leads that wrote on WhatsApp)
 
 The orchestration is plain Python, not a CrewAI Flow: every step after the crew is deterministic (MAIN_PLAN §80).
 """
@@ -14,6 +15,7 @@ from enum import StrEnum
 from ai.schemas import Priority
 from app.analysis.cost import TokenPrices, run_cost
 from app.analysis.engine import AnalysisEngine
+from app.analysis.first_reply import FirstReply
 from app.analysis.snapshots import to_activity_snapshot, to_business_profile, to_lead_snapshot
 from app.core.logger import Logger
 from app.models import Lead
@@ -24,7 +26,7 @@ logger = Logger(__name__)
 
 
 class LeadRoute(StrEnum):
-    """Where the scored lead goes next. Phase 7 attaches actions (owner alert, first-reply draft) to each route."""
+    """Where the scored lead goes next. Every route that wrote on WhatsApp gets a first reply (MAIN_PLAN §66)."""
 
     HOT = "hot"  # critical or high: respond now
     WARM = "warm"  # medium: follow up on the normal cadence
@@ -51,14 +53,26 @@ class FlowOutcome:
 
 
 class NewLeadFlow:
-    def __init__(self, service: LeadService, engine: AnalysisEngine, model: str, prices: TokenPrices | None) -> None:
+    def __init__(
+        self,
+        service: LeadService,
+        engine: AnalysisEngine,
+        model: str,
+        prices: TokenPrices | None,
+        first_reply: FirstReply | None = None,
+    ) -> None:
         self._service = service
         self._engine = engine
         self._model = model
         self._prices = prices
+        self._first_reply = first_reply
 
     async def run(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> FlowOutcome:
-        """Raises when the AI or the database fails; the lead itself is never touched in that case."""
+        """Raises when the AI or the database fails; the lead itself is never touched in that case.
+
+        A failed first reply does not fail the run (the analysis is saved; a retry would bill it again): the lead
+        shows as unanswered on the dashboard, and the owner replies from there or from their phone.
+        """
         business, lead, activities = await self._service.analysis_inputs(business_id, lead_id)
         result = await self._engine.analyze(
             to_business_profile(business),
@@ -77,4 +91,12 @@ class NewLeadFlow:
             priority=saved.priority,
             cost_usd=None if cost is None or cost.cost_usd is None else str(cost.cost_usd),
         )
+        if self._first_reply is not None:
+            try:
+                await self._first_reply.run(business_id, lead_id, result.recommendation)
+            except Exception as exc:
+                logger.fire(
+                    "first_reply_failed", level="error", _exc_info=exc, business_id=str(business_id),
+                    lead_id=str(lead_id),
+                )
         return FlowOutcome(saved, route, cost)

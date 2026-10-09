@@ -50,7 +50,13 @@ class Settings(BaseSettings):
     SUPABASE_S3_SECRET_ACCESS_KEY: str | None   = Field(default=None, description='Supabase Storage S3 secret access key; keep server-side')
     AI_MEMORY_BUCKET:              str | None   = Field(default=None, description='private bucket for per-agent CrewAI memory; unset turns agent memory off')
     AI_MEMORY_CACHE_DIR:           Path            = Field(default=Path('.ai_memory'), description='local directory agents run their memory out of; synced to AI_MEMORY_BUCKET')
-    CORS_ORIGINS:                  CORS_TYPE       = Field(default=['http://localhost:5173'], description='frontend origins allowed by CORS (JSON list or comma-separated)')
+    WHATSAPP_ACCESS_TOKEN:         str | None   = Field(default=None, description='WhatsApp Cloud API token (Meta system user) that sends messages for every connected number; keep server-side')
+    WHATSAPP_APP_SECRET:           str | None   = Field(default=None, description='Meta app secret: verifies the X-Hub-Signature-256 of every webhook; unset rejects all webhooks')
+    WHATSAPP_VERIFY_TOKEN:         str | None   = Field(default=None, description='any secret string, also entered in the Meta app webhook settings (subscription handshake)')
+    WHATSAPP_GRAPH_VERSION:        str          = Field(default='v23.0', description='Graph API version of the WhatsApp Cloud API')
+    WHATSAPP_APPROVAL_TEMPLATE:    str | None   = Field(default=None, description='approved message template (body {{1}} lead, {{2}} draft; 3 quick-reply buttons) sent to an owner outside the 24h window')
+    WHATSAPP_APPROVAL_TEMPLATE_LANGUAGE: str    = Field(default='en', description='language code of WHATSAPP_APPROVAL_TEMPLATE')
+    CORS_ORIGINS:                  CORS_TYPE      = Field(default=['http://localhost:5173'], description='frontend origins allowed by CORS (JSON list or comma-separated)')
 
     @property
     def api_prefix(self) -> str:
