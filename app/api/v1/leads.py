@@ -2,13 +2,13 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import AnalysisEngineDep, DashboardServiceDep, LeadServiceDep
+from app.api.deps import DashboardServiceDep, LeadServiceDep
 from app.core.clock import utc_now as utc_now  # re-export: tests override this dependency
 from app.intelligence import ScoreBreakdown
 from app.schemas.activity import ActivityRead
-from app.schemas.analysis import LeadAnalysis
+from app.schemas.analysis import AnalysisJobRead, LeadAnalysisState
 from app.schemas.common import Page
 from app.schemas.dashboard import DashboardSummary
 from app.schemas.lead import LeadCreate, LeadListItem, LeadListParams, LeadRead, LeadUpdate, RescoreResult
@@ -56,12 +56,20 @@ async def lead_score(business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadSe
     return await service.score(business_id, lead_id)
 
 
-@router.post("/leads/{lead_id}/analyze", response_model=LeadAnalysis)
-async def analyze_lead(
-    business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadServiceDep, engine: AnalysisEngineDep
-) -> LeadAnalysis:
-    """Run the AI crew on the lead (several LLM calls; takes seconds). Saves its summary, next action and score."""
-    return await service.analyze(business_id, lead_id, engine)
+@router.post("/leads/{lead_id}/analyze", response_model=AnalysisJobRead, status_code=status.HTTP_202_ACCEPTED)
+async def analyze_lead(business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadServiceDep) -> AnalysisJobRead:
+    """Queue the AI analysis (NewLeadFlow) for the worker and return its job at once (``analysis_pending``).
+
+    Poll ``GET .../analysis`` until the job is ``succeeded`` or ``failed``. Asking again while a job is open
+    returns that job.
+    """
+    job = await service.request_analysis(business_id, lead_id)
+    return AnalysisJobRead.model_validate(job.model_dump())
+
+
+@router.get("/leads/{lead_id}/analysis", response_model=LeadAnalysisState)
+async def lead_analysis(business_id: uuid.UUID, lead_id: uuid.UUID, service: LeadServiceDep) -> LeadAnalysisState:
+    return await service.analysis_state(business_id, lead_id)
 
 
 @router.get("/leads/{lead_id}/activities", response_model=Page[ActivityRead])

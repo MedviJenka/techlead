@@ -3,6 +3,7 @@ import uuid
 from postgrest import CountMethod
 from supabase import AsyncClient
 
+from ai.schemas.enums import ActivityType
 from app.models import Activity
 
 # PostgREST caps each response at this many rows (Supabase default).
@@ -46,6 +47,22 @@ class ActivityRepository:
             .execute()
         )
         return [Activity.model_validate(row) for row in response.data]
+
+    async def latest_of_type(
+        self, business_id: uuid.UUID, lead_id: uuid.UUID, activity_type: ActivityType
+    ) -> Activity | None:
+        response = (
+            await self._db.table("activities")
+            .select("*")
+            .eq("business_id", str(business_id))
+            .eq("lead_id", str(lead_id))
+            .eq("activity_type", activity_type.value)
+            .order("created_at", desc=True)
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return Activity.model_validate(response.data[0]) if response.data else None
 
     async def all_for_lead(self, business_id: uuid.UUID, lead_id: uuid.UUID) -> list[Activity]:
         """Every activity of one lead, chronological."""

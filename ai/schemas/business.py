@@ -26,13 +26,13 @@ class ScoringWeights(BaseModel):
 class AIConfiguration(BaseModel):
     """Per-business knobs that shape agent behaviour without forking code."""
 
-    extra_skills: list[str] = Field(default_factory=list, description="Additional skill names to attach to every agent")
     tone: str = Field(default="professional, warm and concise")
     language: str = Field(default="English")
     autonomy_level: AutonomyLevel = AutonomyLevel.DRAFT_ONLY
     allowed_actions: list[NextAction] = Field(default_factory=lambda: list(NextAction))
     approval_required_actions: list[NextAction] = Field(default_factory=lambda: list(DEFAULT_APPROVAL_REQUIRED))
     instructions: str | None = Field(default=None, description="Free-text business instructions for agents")
+    auto_analyze: bool = Field(default=True, description="Run the AI analysis (NewLeadFlow) on every new lead")
 
 
 class BusinessProfile(BaseModel):

@@ -33,7 +33,6 @@ class ConversationCrew(BusinessCrew):
             "conversation_agent",
             tier=ModelTier.FAST,
             tools=[GetLeadTool, GetLeadActivitiesTool],
-            skills=["conversation-analysis", "objection-handling"],
         )
 
     @agent
@@ -42,7 +41,6 @@ class ConversationCrew(BusinessCrew):
             "followup_agent",
             tier=ModelTier.REASONING,
             tools=[GetLeadActivitiesTool, GetBusinessConfigurationTool],
-            skills=["follow-up-strategy", "objection-handling"],
         )
 
     def analyze_message(

@@ -15,7 +15,9 @@ services:
 
   backend:
     container_name: techlead-backend
-    build: .
+    build:
+      context: .
+      target: api
     env_file:
       - path: .env
         required: false
@@ -24,6 +26,19 @@ services:
       CORS_ORIGINS: '["http://localhost:5173"]'
     ports:
       - "127.0.0.1:8000:8000"
+
+  # Runs NewLeadFlow on queued AI analysis jobs (new leads, "Analyze" clicks). Needs OPENAI_API_KEY in .env.
+  worker:
+    container_name: techlead-worker
+    build:
+      context: .
+      target: worker
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    restart: unless-stopped
 
   frontend:
     container_name: techlead-frontend

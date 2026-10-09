@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import { apiFetch } from './client'
 import type {
   Activity,
   Dashboard,
   ImportResult,
   Lead,
-  LeadAnalysis,
+  AnalysisJob,
+  LeadAnalysisState,
   LeadDetail,
   Page,
   RescoreResult,
@@ -53,4 +55,24 @@ export const useImport = (id: string) =>
 export const useRescore = (id: string) =>
   useLeadMutation<RescoreResult>(id, '/leads/rescore')
 export const useAnalyze = (id: string, leadId: string) =>
-  useLeadMutation<LeadAnalysis>(id, `/leads/${leadId}/analyze`)
+  useLeadMutation<AnalysisJob>(id, `/leads/${leadId}/analyze`)
+
+const isOpen = (state: LeadAnalysisState | undefined) =>
+  state?.job?.status === 'pending' || state?.job?.status === 'running'
+
+// Polls while a job is queued or running; the lead and its timeline refresh when it finishes.
+export function useAnalysisState(id: string, leadId: string) {
+  const client = useQueryClient()
+  const wasOpen = useRef(false)
+  const query = useQuery({
+    queryKey: ['businesses', id, `/leads/${leadId}/analysis`],
+    queryFn: () => apiFetch<LeadAnalysisState>(`${businessPath(id)}/leads/${leadId}/analysis`),
+    refetchInterval: (q) => (isOpen(q.state.data) ? 3000 : false),
+  })
+  const open = isOpen(query.data)
+  useEffect(() => {
+    if (wasOpen.current && !open) void client.invalidateQueries({ queryKey: ['businesses', id] })
+    wasOpen.current = open
+  }, [client, id, open])
+  return query
+}

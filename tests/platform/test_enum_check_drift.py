@@ -12,7 +12,7 @@ import pytest
 from pydantic import BaseModel
 
 from ai.schemas.enums import ActivityType, Channel, Priority, Sentiment
-from app.models import Activity, Business, Lead, User
+from app.models import Activity, AnalysisJob, AnalysisJobStatus, AnalysisTrigger, Business, Lead, User
 from tests.platform.conftest import ROOT
 
 SQL = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "db").glob("*.sql")))
@@ -25,6 +25,8 @@ ENUM_CHECKS = [
     ("ck_activities_activity_type", {member.value for member in ActivityType}),
     ("ck_activities_activity_channel", {member.value for member in Channel}),
     ("ck_users_user_role", USER_ROLES),
+    ("ck_analysis_jobs_analysis_job_status", {member.value for member in AnalysisJobStatus}),
+    ("ck_analysis_jobs_analysis_trigger", {member.value for member in AnalysisTrigger}),
 ]
 
 
@@ -46,13 +48,19 @@ def test_check_constraint_allows_exactly_the_enum_values(constraint: str, values
     assert _check_values(constraint) == values
 
 
-@pytest.mark.parametrize("enum", [Priority, Sentiment, ActivityType, Channel])
+@pytest.mark.parametrize("enum", [Priority, Sentiment, ActivityType, Channel, AnalysisJobStatus, AnalysisTrigger])
 def test_enum_values_fit_the_column(enum: type[StrEnum]) -> None:
     assert all(len(member.value) <= ENUM_COLUMN_LENGTH for member in enum)
 
 
 @pytest.mark.parametrize(
-    ("table", "model"), [("businesses", Business), ("leads", Lead), ("activities", Activity), ("users", User)]
+    ("table", "model"), [
+        ("businesses", Business),
+        ("leads", Lead),
+        ("activities", Activity),
+        ("users", User),
+        ("analysis_jobs", AnalysisJob),
+    ]
 )
 def test_table_columns_match_the_model(table: str, model: type[BaseModel]) -> None:
     assert _table_columns(table) == set(model.model_fields)

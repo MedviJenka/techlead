@@ -11,7 +11,6 @@ from crewai.memory.types import MemoryRecord
 from ai.crews import AIRuntime, LeadIntelligenceCrew
 from ai.data.sample_store import InMemoryLeadStore
 from ai.memory import AgentMemoryStore, MemoryKey
-from ai.skill_library import SkillLibrary
 from tests.conftest import BUSINESS_ID
 from tests.fakes import ScriptedLLM
 
@@ -124,17 +123,17 @@ class TestAgentMemoryStore:
 
 
 class TestCrewWiring:
-    def make(self, store: InMemoryLeadStore, skills: SkillLibrary, memory: AgentMemoryStore | None
+    def make(self, store: InMemoryLeadStore, memory: AgentMemoryStore | None
              ) -> LeadIntelligenceCrew:
         llm = ScriptedLLM({})
-        return LeadIntelligenceCrew.for_business(AIRuntime(store, lambda tier: llm, skills, memory=memory),
+        return LeadIntelligenceCrew.for_business(AIRuntime(store, lambda tier: llm, memory=memory),
                                                  BUSINESS_ID)
 
     def test_each_agent_gets_its_own_business_scoped_memory(
-        self, tmp_path: Path, bucket: DirObjectStore, store: InMemoryLeadStore, skill_library: SkillLibrary
+        self, tmp_path: Path, bucket: DirObjectStore, store: InMemoryLeadStore
     ) -> None:
         memory = AgentMemoryStore(bucket, tmp_path / "cache")
-        crew = self.make(store, skill_library, memory)
+        crew = self.make(store, memory)
 
         agents = [crew.qualification_agent(), crew.scoring_agent(), crew.next_action_agent()]
 
@@ -143,20 +142,20 @@ class TestCrewWiring:
             "next_action_agent", "qualification_agent", "scoring_agent"]
         assert {key.business_id for key in crew._memory_keys} == {BUSINESS_ID}
 
-    def test_no_memory_store_means_no_memory(self, store: InMemoryLeadStore, skill_library: SkillLibrary) -> None:
-        crew = self.make(store, skill_library, None)
+    def test_no_memory_store_means_no_memory(self, store: InMemoryLeadStore) -> None:
+        crew = self.make(store, None)
 
         assert crew.scoring_agent().memory is None
 
     def test_failed_sync_does_not_fail_the_run(
-        self, tmp_path: Path, store: InMemoryLeadStore, skill_library: SkillLibrary
+        self, tmp_path: Path, store: InMemoryLeadStore
     ) -> None:
         class BrokenBucket(DirObjectStore):
             def upload(self, path: Path, key: str) -> None:
                 raise ConnectionError("storage down")
 
         memory = AgentMemoryStore(BrokenBucket(tmp_path / "bucket"), tmp_path / "cache")
-        crew = self.make(store, skill_library, memory)
+        crew = self.make(store, memory)
         crew.scoring_agent()
         remember(memory.path(KEY), "fact")
 

@@ -4,7 +4,6 @@ from ai.crews.lead_intelligence.crew import LeadIntelligenceCrew, LeadIntelligen
 from ai.data.sample_store import InMemoryLeadStore
 from ai.evals import LEAD_INTELLIGENCE_CASES, RANKING, EvalCase, check_case, check_ranking, run_lead_intelligence_eval
 from ai.schemas import NextAction, Priority
-from ai.skill_library import SkillLibrary
 from tests.conftest import BUSINESS_ID, make_crew
 from tests.fakes import ScriptedLLM
 from tests.test_crews import AI_SCORE, QUALIFIED, call_now
@@ -23,8 +22,8 @@ def hot_script() -> ScriptedLLM:
                         "recommend_next_action_task": [call_now()]})
 
 
-def lead_crew(store: InMemoryLeadStore, llm: ScriptedLLM, skills: SkillLibrary) -> LeadIntelligenceCrew:
-    return make_crew(LeadIntelligenceCrew, store, llm, skills)
+def lead_crew(store: InMemoryLeadStore, llm: ScriptedLLM) -> LeadIntelligenceCrew:
+    return make_crew(LeadIntelligenceCrew, store, llm)
 
 
 class TestCases:
@@ -74,26 +73,26 @@ class TestCheckRanking:
 
 
 class TestRun:
-    def test_passing_run(self, store: InMemoryLeadStore, skill_library: SkillLibrary) -> None:
-        report = run_lead_intelligence_eval(store, lambda: lead_crew(store, hot_script(), skill_library),
+    def test_passing_run(self, store: InMemoryLeadStore) -> None:
+        report = run_lead_intelligence_eval(store, lambda: lead_crew(store, hot_script()),
                                             BUSINESS_ID, [HOT], model="scripted", min_pass_rate=1.0)
 
         assert report.passed
         assert report.cases[0].result is not None
         assert "Result: PASS" in report.render()
 
-    def test_wrong_answer_fails_the_run(self, store: InMemoryLeadStore, skill_library: SkillLibrary) -> None:
+    def test_wrong_answer_fails_the_run(self, store: InMemoryLeadStore) -> None:
         cold = EvalCase("lead_007", "cold", qualified=False, max_score=45)
-        report = run_lead_intelligence_eval(store, lambda: lead_crew(store, hot_script(), skill_library),
+        report = run_lead_intelligence_eval(store, lambda: lead_crew(store, hot_script()),
                                             BUSINESS_ID, [HOT, cold], model="scripted", min_pass_rate=0.8)
 
         assert report.pass_rate == 0.5
         assert not report.passed
         assert report.ranking_failures  # lead_008 tied with lead_007
 
-    def test_crew_error_is_a_failed_case(self, store: InMemoryLeadStore, skill_library: SkillLibrary) -> None:
+    def test_crew_error_is_a_failed_case(self, store: InMemoryLeadStore) -> None:
         llm = ScriptedLLM({"qualify_lead_task": [QUALIFIED]})  # no answer for scoring: the run raises
-        report = run_lead_intelligence_eval(store, lambda: lead_crew(store, llm, skill_library),
+        report = run_lead_intelligence_eval(store, lambda: lead_crew(store, llm),
                                             BUSINESS_ID, [HOT], model="scripted", min_pass_rate=0.0)
 
         assert report.cases[0].error is not None

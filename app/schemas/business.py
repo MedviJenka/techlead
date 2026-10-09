@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Annotated
 from zoneinfo import available_timezones
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from ai.schemas.business import AIConfiguration
 from app.schemas.common import MAX_JSON_FIELD_BYTES as MAX_JSON_FIELD_BYTES  # re-export (backward compat)
@@ -20,10 +20,6 @@ SLUG_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 # Computed once: available_timezones() walks the tzdata tree on every call.
 KNOWN_TIMEZONES: frozenset[str] = frozenset(available_timezones())
 
-MAX_EXTRA_SKILLS = 10
-SkillName = Annotated[str, StringConstraints(min_length=1, max_length=100, pattern=SLUG_PATTERN)]
-
-
 class AIConfigurationInput(BaseModel):
     """Client-settable subset of ``AIConfiguration``.
 
@@ -36,9 +32,8 @@ class AIConfigurationInput(BaseModel):
     tone: str = Field(default="professional, warm and concise", min_length=1, max_length=200)
     language: str = Field(default="English", min_length=1, max_length=50)
     instructions: str | None = Field(default=None, max_length=4000)
-    # TODO: validate names against the skill library once it is importable without crewai; unknown names
-    # currently surface only at crew composition (ai/factory/skills.py).
-    extra_skills: list[SkillName] = Field(default_factory=list, max_length=MAX_EXTRA_SKILLS)
+    # Every new lead (created or imported) is analysed by the worker: real, billed LLM calls per lead.
+    auto_analyze: bool = True
 
     def to_ai_configuration(self) -> AIConfiguration:
         """Full AI configuration with server-controlled policy defaults applied."""

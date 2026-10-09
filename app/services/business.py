@@ -39,12 +39,15 @@ class BusinessSettings:
 
     configuration: BusinessConfiguration
     custom_fields: list[CustomFieldDefinition]
+    # New leads are queued for AI analysis (NewLeadFlow) unless the business turned it off.
+    auto_analyze: bool = True
 
     @classmethod
     def of(cls, business: Business) -> "BusinessSettings":
         return cls(
             BusinessConfiguration.from_stored(business.configuration),
             stored_definitions(business.custom_field_definitions),
+            business.ai_configuration.get("auto_analyze") is not False,
         )
 
 

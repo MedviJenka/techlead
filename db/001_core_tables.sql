@@ -77,3 +77,51 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 
 CREATE INDEX IF NOT EXISTS ix_activities_business_id_lead_id_created_at ON activities (business_id, lead_id, created_at);
+
+-- AI analysis jobs (MAIN_PLAN §58, §65). A saved lead or POST /analyze enqueues one; the worker (app/worker)
+-- claims it with claim_analysis_job (db/004_functions.sql), runs NewLeadFlow and records the outcome and cost.
+CREATE TABLE IF NOT EXISTS analysis_jobs (
+    id           UUID           NOT NULL DEFAULT gen_random_uuid(),
+    business_id  UUID           NOT NULL,
+    lead_id      UUID           NOT NULL,
+    trigger      VARCHAR(32)    NOT NULL,
+    status       VARCHAR(32)    NOT NULL DEFAULT 'pending',
+    attempts     INTEGER        NOT NULL DEFAULT 0,
+    max_attempts INTEGER        NOT NULL DEFAULT 5,
+    run_after    TIMESTAMPTZ    NOT NULL DEFAULT now(),
+    locked_until TIMESTAMPTZ,
+    worker       VARCHAR(200),
+    last_error   TEXT,
+    usage        JSONB,
+    cost_usd     NUMERIC(12, 6),
+    created_at   TIMESTAMPTZ    NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ    NOT NULL DEFAULT now(),
+    finished_at  TIMESTAMPTZ,
+    CONSTRAINT pk_analysis_jobs PRIMARY KEY (id),
+    CONSTRAINT fk_analysis_jobs_business_id_businesses
+        FOREIGN KEY (business_id) REFERENCES businesses (id) ON DELETE CASCADE,
+    CONSTRAINT fk_analysis_jobs_business_id_lead_id_leads
+        FOREIGN KEY (business_id, lead_id) REFERENCES leads (business_id, id) ON DELETE CASCADE,
+    CONSTRAINT ck_analysis_jobs_analysis_job_status CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
+    CONSTRAINT ck_analysis_jobs_analysis_trigger CHECK (trigger IN ('lead_created', 'manual'))
+);
+
+-- At most one open job per lead: enqueueing again while one is pending or running returns that job.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_analysis_jobs_open_lead
+    ON analysis_jobs (business_id, lead_id) WHERE status IN ('pending', 'running');
+CREATE INDEX IF NOT EXISTS ix_analysis_jobs_pending_run_after ON analysis_jobs (run_after) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS ix_analysis_jobs_running_locked_until
+    ON analysis_jobs (locked_until) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS ix_analysis_jobs_business_id_lead_id_created_at
+    ON analysis_jobs (business_id, lead_id, created_at);
+
+-- Per-business write lease, shared by every backend and worker process (try_lock_business in db/004_functions.sql).
+-- It serializes match-then-save deduplication across processes; an expired lease may be taken over.
+CREATE TABLE IF NOT EXISTS business_locks (
+    business_id UUID         NOT NULL,
+    holder      VARCHAR(200) NOT NULL,
+    expires_at  TIMESTAMPTZ  NOT NULL,
+    CONSTRAINT pk_business_locks PRIMARY KEY (business_id),
+    CONSTRAINT fk_business_locks_business_id_businesses
+        FOREIGN KEY (business_id) REFERENCES businesses (id) ON DELETE CASCADE
+);

@@ -10,7 +10,7 @@ from app.core.errors import ConflictError
 from app.models import Business
 from app.repositories import BusinessRepository
 from app.schemas import BusinessCreate
-from app.schemas.business import MAX_CUSTOM_FIELD_DEFINITIONS, MAX_EXTRA_SKILLS
+from app.schemas.business import MAX_CUSTOM_FIELD_DEFINITIONS
 from app.schemas.configuration import BusinessConfiguration
 from app.services.business import BusinessService
 
@@ -36,13 +36,12 @@ def test_ai_policy_fields_are_not_client_settable(policy_field: dict[str, Any]) 
 
 
 def test_ai_configuration_applies_server_policy_defaults() -> None:
-    data = _create(ai_configuration={"tone": "friendly", "language": "Hebrew", "extra_skills": ["lead-scoring"]})
+    data = _create(ai_configuration={"tone": "friendly", "language": "Hebrew"})
 
     config = data.ai_configuration.to_ai_configuration()
 
     assert config.tone == "friendly"
     assert config.language == "Hebrew"
-    assert config.extra_skills == ["lead-scoring"]
     assert config.autonomy_level == AutonomyLevel.DRAFT_ONLY
     assert config.approval_required_actions == list(DEFAULT_APPROVAL_REQUIRED)
 
@@ -53,9 +52,6 @@ def test_ai_configuration_applies_server_policy_defaults() -> None:
         {"tone": "x" * 201},
         {"language": "x" * 51},
         {"instructions": "x" * 4001},
-        {"extra_skills": ["Not A Skill"]},
-        {"extra_skills": ["x" * 101]},
-        {"extra_skills": [f"skill-{i}" for i in range(MAX_EXTRA_SKILLS + 1)]},
     ],
 )
 def test_ai_configuration_input_is_bounded(ai_configuration: dict[str, Any]) -> None:

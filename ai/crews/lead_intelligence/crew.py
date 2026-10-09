@@ -39,7 +39,6 @@ class LeadIntelligenceCrew(BusinessCrew):
             "qualification_agent",
             tier=ModelTier.REASONING,
             tools=[GetLeadTool, GetLeadActivitiesTool, GetBusinessConfigurationTool],
-            skills=["lead-qualification", "conversation-analysis"],
         )
 
     @agent
@@ -48,7 +47,6 @@ class LeadIntelligenceCrew(BusinessCrew):
             "scoring_agent",
             tier=ModelTier.REASONING,
             tools=[GetLeadActivitiesTool],
-            skills=["lead-scoring", "objection-handling"],
         )
 
     @agent
@@ -57,7 +55,6 @@ class LeadIntelligenceCrew(BusinessCrew):
             "next_action_agent",
             tier=ModelTier.REASONING,
             tools=[GetLeadActivitiesTool, GetBusinessConfigurationTool],
-            skills=["sales-reasoning", "objection-handling"],
         )
 
     @task
