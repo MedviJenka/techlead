@@ -1,6 +1,6 @@
-# Local WhatsApp mock (app/api/v1/mock.py) in place of Meta's Cloud API. Opt-in, layered over compose.yml:
+# Local WhatsApp mock (app/api/v1/mock.py) in place of Meta's Cloud API. Opt-in, layered over compose.yaml:
 #
-#   docker compose -f compose.yml -f compose.mock.yml up --build
+#   docker compose -f compose.yaml -f compose.mock.yaml up --build
 #
 # Chat page: http://localhost:8001. Connect a business's WhatsApp number in the app with phone number id
 # 100000000000001 (MOCK_PHONE_NUMBER_ID). The backend and the worker send to the mock instead of graph.facebook.com,
