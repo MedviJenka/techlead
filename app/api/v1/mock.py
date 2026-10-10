@@ -23,8 +23,8 @@ and open http://localhost:8001 for a chat page (JSON routes under ``/mock``, doc
 ``MOCK_PORT`` (8001), ``MOCK_WEBHOOK_URL`` (http://localhost:8000/api/v1/webhooks/whatsapp), ``MOCK_PHONE_NUMBER_ID``.
 Everything is kept in memory and lost on restart.
 
-In Docker, ``compose.mock.yml`` runs it as the ``whatsapp-mock`` service and wires the backend and the worker to it:
-``docker compose -f compose.yml -f compose.mock.yml up --build``.
+In Docker, ``compose.mock.yaml`` runs it as the ``whatsapp-mock`` service and wires the backend and the worker to it:
+``docker compose -f compose.yaml -f compose.mock.yaml up --build``.
 """
 
 import hashlib
