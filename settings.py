@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     WHATSAPP_APP_SECRET:           str | None   = Field(default=None, description='Meta app secret: verifies the X-Hub-Signature-256 of every webhook; unset rejects all webhooks')
     WHATSAPP_VERIFY_TOKEN:         str | None   = Field(default=None, description='any secret string, also entered in the Meta app webhook settings (subscription handshake)')
     WHATSAPP_GRAPH_VERSION:        str          = Field(default='v23.0', description='Graph API version of the WhatsApp Cloud API')
+    WHATSAPP_GRAPH_URL:            str          = Field(default='https://graph.facebook.com', description='base URL of the Graph API; http://localhost:8001 sends to the local mock (python -m app.api.v1.mock)')
     WHATSAPP_APPROVAL_TEMPLATE:    str | None   = Field(default=None, description='approved message template (body {{1}} lead, {{2}} draft; 3 quick-reply buttons) sent to an owner outside the 24h window')
     WHATSAPP_APPROVAL_TEMPLATE_LANGUAGE: str    = Field(default='en', description='language code of WHATSAPP_APPROVAL_TEMPLATE')
     CORS_ORIGINS:                  CORS_TYPE      = Field(default=['http://localhost:5173'], description='frontend origins allowed by CORS (JSON list or comma-separated)')

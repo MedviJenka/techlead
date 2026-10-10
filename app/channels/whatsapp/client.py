@@ -76,13 +76,19 @@ def _template_param(text: str) -> str:
 
 
 class WhatsAppCloudClient:
-    """``token`` is the Meta system-user token; ``http`` replaces the HTTP client (tests)."""
+    """``token`` is the Meta system-user token; ``graph_url`` replaces Meta (the local mock, ``app.api.v1.mock``);
+    ``http`` replaces the HTTP client (tests)."""
 
     def __init__(
-        self, token: str | None, graph_version: str, http: httpx.AsyncClient | None = None, timeout: float = 15.0
+        self,
+        token: str | None,
+        graph_version: str,
+        http: httpx.AsyncClient | None = None,
+        timeout: float = 15.0,
+        graph_url: str = GRAPH_URL,
     ) -> None:
         self._token = token
-        self._base = f"{GRAPH_URL}/{graph_version}"
+        self._base = f"{graph_url.rstrip('/')}/{graph_version}"
         self._http = http
         self._timeout = timeout
 

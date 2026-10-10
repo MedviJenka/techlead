@@ -81,7 +81,9 @@ class ApprovalTemplate:
 
 
 def whatsapp_sender(config: Settings) -> WhatsAppCloudClient:
-    return WhatsAppCloudClient(config.WHATSAPP_ACCESS_TOKEN, config.WHATSAPP_GRAPH_VERSION)
+    return WhatsAppCloudClient(
+        config.WHATSAPP_ACCESS_TOKEN, config.WHATSAPP_GRAPH_VERSION, graph_url=config.WHATSAPP_GRAPH_URL
+    )
 
 
 class ReplyService:

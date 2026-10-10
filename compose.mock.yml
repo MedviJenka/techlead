@@ -1,0 +1,40 @@
+# Local WhatsApp mock (app/api/v1/mock.py) in place of Meta's Cloud API. Opt-in, layered over compose.yml:
+#
+#   docker compose -f compose.yml -f compose.mock.yml up --build
+#
+# Chat page: http://localhost:8001. Connect a business's WhatsApp number in the app with phone number id
+# 100000000000001 (MOCK_PHONE_NUMBER_ID). The backend and the worker send to the mock instead of graph.facebook.com,
+# and the mock posts signed webhooks to the backend. The WhatsApp secrets default to mock values when .env has none.
+
+x-whatsapp-mock-env: &whatsapp-mock-env
+  WHATSAPP_GRAPH_URL: http://whatsapp-mock:8001
+  WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-mock}
+  WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-mock-secret}
+  WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-mock-verify}
+
+services:
+
+  backend:
+    environment: *whatsapp-mock-env
+
+  worker:
+    environment: *whatsapp-mock-env
+
+  whatsapp-mock:
+    container_name: techlead-whatsapp-mock
+    build:
+      context: .
+      target: api
+    command: ["uvicorn", "app.api.v1.mock:app", "--host", "0.0.0.0", "--port", "8001"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *whatsapp-mock-env
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      MOCK_WEBHOOK_URL: http://backend:8000/api/v1/webhooks/whatsapp
+      MOCK_PHONE_NUMBER_ID: ${MOCK_PHONE_NUMBER_ID:-100000000000001}
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      - backend
