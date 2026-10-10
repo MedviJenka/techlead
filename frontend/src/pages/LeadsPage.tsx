@@ -9,8 +9,9 @@ import { inputClass } from '../components/leadDisplay'
 import { AnimatedNumber, Button, ErrorState, Icon, Skeleton } from '../components/ui'
 import { spring } from '../components/motion'
 
-// URL-only keys: the list endpoint forbids unknown query parameters.
-const UI_PARAMS = ['import']
+// The list endpoint forbids unknown query parameters (LeadListParams), so only these reach it. Anything else in
+// the URL (`import`, or the `code` the Google sign-in redirect leaves behind) stays in the page.
+const API_PARAMS = ['status', 'priority', 'source', 'q', 'limit', 'offset']
 
 const QUICK_FILTERS: { label: string; params: Record<string, string>; hot?: boolean }[] = [
   { label: 'All', params: {} },
@@ -176,8 +177,7 @@ function TableSkeleton() {
 export function LeadsPage() {
   const { businessId = '' } = useParams()
   const [params, setParams] = useSearchParams()
-  const apiParams = new URLSearchParams(params)
-  UI_PARAMS.forEach((key) => apiParams.delete(key))
+  const apiParams = new URLSearchParams([...params].filter(([key]) => API_PARAMS.includes(key)))
   const leads = useLeads(businessId, apiParams.toString())
   const offset = Number(params.get('offset') || 0)
   const importOpen = params.has('import')
