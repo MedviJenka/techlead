@@ -326,9 +326,9 @@ export function AiCard({
               type="button"
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
-              className="inline-flex items-center gap-1 text-xs font-medium text-ai hover:underline"
+              className="group inline-flex items-center gap-1 text-xs font-medium text-ai"
             >
-              Why?
+              <span className="group-hover:underline">Why?</span>
               <motion.span animate={{ rotate: open ? 180 : 0 }} className="inline-flex">
                 <Icon name="expand_more" className="text-base!" />
               </motion.span>
