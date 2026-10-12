@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field
 from app.core.logger import Logger
 from settings import get_config
 
-logger = Logger(__name__)
+logger = Logger("mock-api")
 
 PORT = int(os.environ.get("MOCK_PORT", "8001"))
 WEBHOOK_URL = os.environ.get("MOCK_WEBHOOK_URL", "http://localhost:8000/api/v1/webhooks/whatsapp")

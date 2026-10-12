@@ -14,7 +14,7 @@ from app.schemas import BusinessCreate
 from app.schemas.account import MeRead
 from app.services.business import UNIQUE_VIOLATION, BusinessService
 
-logger = Logger(__name__)
+logger = Logger("account-service")
 
 OWNER_ROLE = "owner"
 

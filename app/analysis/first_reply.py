@@ -1,14 +1,18 @@
 """The first reply (MAIN_PLAN §66): a lead that wrote on WhatsApp gets a drafted answer within a minute, sent to the
 owner's phone for approval. Runs in the worker as the last step of NewLeadFlow, after the lead is scored.
+
+With auto-send on (``WhatsAppAccount.auto_send_after_minutes``), the draft also gets an ``auto_send_at``: the worker
+sends it then if the owner has not decided. Not for a lead the analysis found a poor fit: that draft waits for the
+owner.
 """
 
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from ai.schemas import Channel, NextActionRecommendation
-from ai.schemas.enums import ActivityType
+from ai.schemas import Channel, NextActionRecommendation, QualificationResult
+from ai.schemas.enums import ActivityType, FitLevel
 from app.analysis.drafting import ReplyDrafter
 from app.analysis.snapshots import to_activity_snapshot, to_business_profile, to_lead_snapshot
 from app.core.logger import Logger
@@ -17,7 +21,7 @@ from app.models import ReplyDraft
 from app.services.lead import LeadService
 from app.services.replies import ReplyService
 
-logger = Logger(__name__)
+logger = Logger("first-reply")
 
 
 class FirstReply:
@@ -30,7 +34,11 @@ class FirstReply:
         self._clock = clock
 
     async def run(
-        self, business_id: uuid.UUID, lead_id: uuid.UUID, recommendation: NextActionRecommendation | None
+        self,
+        business_id: uuid.UUID,
+        lead_id: uuid.UUID,
+        recommendation: NextActionRecommendation | None,
+        qualification: QualificationResult | None = None,
     ) -> ReplyDraft | None:
         """The draft sent for approval, or None when the lead needs none (already answered, not on WhatsApp...)."""
         log: dict[str, Any] = {"business_id": str(business_id), "lead_id": str(lead_id)}
@@ -55,12 +63,20 @@ class FirstReply:
             [to_activity_snapshot(activity) for activity in activities],
             recommendation,
         )
-        saved = await self._replies.create_draft(business_id, lead_id, Channel.WHATSAPP, draft.message, draft.objective)
+        auto_send_at = None
+        if account.auto_send_after_minutes is not None and not (qualification and qualification.fit is FitLevel.POOR):
+            auto_send_at = self._clock() + timedelta(minutes=account.auto_send_after_minutes)
+        saved = await self._replies.create_draft(
+            business_id, lead_id, Channel.WHATSAPP, draft.message, draft.objective, auto_send_at
+        )
         if saved is None:
             logger.fire("first_reply_skipped", reason="already_drafted", **log)
             return None
         seconds = round((self._clock() - lead.created_at).total_seconds(), 1)
-        logger.fire("first_reply_drafted", draft_id=str(saved.id), seconds_since_lead=seconds, **log)
+        logger.fire(
+            "first_reply_drafted", draft_id=str(saved.id), seconds_since_lead=seconds,
+            auto_send_at=auto_send_at.isoformat() if auto_send_at else None, **log,
+        )
         body = inbound[-1].metadata.get("body")
         await self._replies.request_approval(account, saved, lead, body if isinstance(body, str) else None)
         return saved

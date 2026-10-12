@@ -14,7 +14,7 @@ from app.core.logger import Logger
 from settings import get_config
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
-logger = Logger(__name__)
+logger = Logger("webhooks-api")
 
 WHATSAPP_PATH = "/webhooks/whatsapp"
 

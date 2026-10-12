@@ -278,6 +278,13 @@ class FakeDrafts:
         drafts = await self.with_status(business_id, [ReplyDraftStatus.AWAITING_EDIT], 1)
         return drafts[0] if drafts else None
 
+    async def due_for_auto_send(self, now: datetime, limit: int) -> list[ReplyDraft]:
+        due = [
+            d for d in self.drafts
+            if d.status is ReplyDraftStatus.PENDING_APPROVAL and d.auto_send_at is not None and d.auto_send_at <= now
+        ]
+        return sorted(due, key=lambda d: d.auto_send_at or now)[:limit]
+
     async def transition(
         self, draft: ReplyDraft, from_statuses: Collection[ReplyDraftStatus], values: dict[str, Any]
     ) -> ReplyDraft | None:

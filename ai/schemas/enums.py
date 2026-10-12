@@ -2,32 +2,32 @@ from enum import IntEnum, StrEnum
 
 
 class Priority(StrEnum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
+    LOW      = "low"
+    MEDIUM   = "medium"
+    HIGH     = "high"
     CRITICAL = "critical"
 
 
 class IntentLevel(StrEnum):
-    NONE = "none"
-    LOW = "low"
+    NONE   = "none"
+    LOW    = "low"
     MEDIUM = "medium"
-    HIGH = "high"
+    HIGH   = "high"
 
 
 class Urgency(StrEnum):
-    UNKNOWN = "unknown"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
+    UNKNOWN   = "unknown"
+    LOW       = "low"
+    MEDIUM    = "medium"
+    HIGH      = "high"
     IMMEDIATE = "immediate"
 
 
 class FitLevel(StrEnum):
-    UNKNOWN = "unknown"
-    POOR = "poor"
-    PARTIAL = "partial"
-    GOOD = "good"
+    UNKNOWN   = "unknown"
+    POOR      = "poor"
+    PARTIAL   = "partial"
+    GOOD      = "good"
     EXCELLENT = "excellent"
 
 

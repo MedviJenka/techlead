@@ -22,7 +22,8 @@ A good follow-up proves you remember the conversation and moves it one concrete 
 3. End with one easy call to action (a yes/no question or two time options).
 4. Match the channel: WhatsApp — short and conversational, 2-4 sentences; email — subject plus short
    paragraphs; SMS — under 320 characters; CRM task — an instruction for the salesperson.
-5. Match the business tone and language from the business configuration.
+5. Match the business tone. Write in the language the lead wrote in; the business's configured language is only
+   the default for a lead who has not written yet.
 
 ## Using context
 

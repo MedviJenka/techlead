@@ -133,9 +133,11 @@ CREATE TABLE IF NOT EXISTS whatsapp_accounts (
     phone_number_id VARCHAR(64) NOT NULL,
     display_phone   VARCHAR(32),
     owner_phone     VARCHAR(32) NOT NULL,
+    auto_send_after_minutes INTEGER,  -- an undecided first reply is sent after this long; NULL: never
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT pk_whatsapp_accounts PRIMARY KEY (business_id),
+    CONSTRAINT ck_whatsapp_accounts_auto_send_after_minutes CHECK (auto_send_after_minutes BETWEEN 1 AND 1440),
     CONSTRAINT fk_whatsapp_accounts_business_id_businesses
         FOREIGN KEY (business_id) REFERENCES businesses (id) ON DELETE CASCADE,
     CONSTRAINT uq_whatsapp_accounts_phone_number_id UNIQUE (phone_number_id)
@@ -182,6 +184,7 @@ CREATE TABLE IF NOT EXISTS reply_drafts (
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
     decided_at          TIMESTAMPTZ,
     sent_at             TIMESTAMPTZ,
+    auto_send_at        TIMESTAMPTZ,  -- sent by the worker then if still pending_approval; NULL: never
     CONSTRAINT pk_reply_drafts PRIMARY KEY (id),
     CONSTRAINT fk_reply_drafts_business_id_businesses
         FOREIGN KEY (business_id) REFERENCES businesses (id) ON DELETE CASCADE,
@@ -191,7 +194,7 @@ CREATE TABLE IF NOT EXISTS reply_drafts (
         'pending_approval', 'awaiting_edit', 'sending', 'sent', 'rejected', 'failed'
     )),
     CONSTRAINT ck_reply_drafts_reply_channel CHECK (channel IN ('whatsapp', 'email', 'sms', 'phone', 'crm_task')),
-    CONSTRAINT ck_reply_drafts_decision_channel CHECK (decided_via IN ('whatsapp', 'dashboard'))
+    CONSTRAINT ck_reply_drafts_decision_channel CHECK (decided_via IN ('whatsapp', 'dashboard', 'auto'))
 );
 
 -- At most one undecided draft per lead.
@@ -199,3 +202,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_reply_drafts_open_lead
     ON reply_drafts (business_id, lead_id) WHERE status IN ('pending_approval', 'awaiting_edit', 'sending');
 CREATE INDEX IF NOT EXISTS ix_reply_drafts_business_id_status_created_at
     ON reply_drafts (business_id, status, created_at);
+-- The worker's auto-send sweep, across businesses.
+CREATE INDEX IF NOT EXISTS ix_reply_drafts_auto_send_at
+    ON reply_drafts (auto_send_at) WHERE status = 'pending_approval' AND auto_send_at IS NOT NULL;

@@ -10,7 +10,7 @@ from ai.schemas import AIScoreResult, NextActionRecommendation, QualificationRes
 from app.core.logger import Logger
 from app.models import Activity, AnalysisJobStatus, AnalysisTrigger
 
-logger = Logger(__name__)
+logger = Logger("analysis-schema")
 
 
 class AnalysisResult(Protocol):

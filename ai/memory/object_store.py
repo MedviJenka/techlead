@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from settings import Settings
 
 
-logger = Logger(__name__)
+logger = Logger("object-store")
 
 
 class ObjectStore(Protocol):

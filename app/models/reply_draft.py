@@ -23,10 +23,11 @@ SENDABLE_DRAFT_STATUSES = OPEN_DRAFT_STATUSES | {ReplyDraftStatus.FAILED}
 
 
 class DecisionChannel(StrEnum):
-    """Where the owner decided: on their phone (the main surface) or the dashboard (the fallback)."""
+    """Where the owner decided: on their phone (the main surface) or the dashboard (the fallback), or nobody did."""
 
     WHATSAPP = "whatsapp"
     DASHBOARD = "dashboard"
+    AUTO = "auto"  # nobody decided in time: the worker sent it (``auto_send_at``)
 
 
 class ReplyDraft(BaseModel):
@@ -48,3 +49,4 @@ class ReplyDraft(BaseModel):
     updated_at: datetime
     decided_at: datetime | None
     sent_at: datetime | None
+    auto_send_at: datetime | None = None

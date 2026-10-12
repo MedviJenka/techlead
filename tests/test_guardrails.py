@@ -142,3 +142,22 @@ class TestMessaging:
         assert self.validate(draft(requires_human_approval=False))
         autonomous = self.business.model_copy(update={"ai": AIConfiguration(autonomy_level=AutonomyLevel.LOW_RISK_AUTOMATION)})
         assert make_messaging_validator(autonomous, self.lead)(draft(requires_human_approval=False)) == []
+
+    def test_reply_to_hebrew_lead_must_be_in_hebrew(self) -> None:
+        validate = make_messaging_validator(self.business, self.lead, "שלום, כמה עולה שיעור טיסת היכרות?")
+        assert any("same language" in e for e in validate(draft(message="Hi, happy to help with an intro flight.")))
+        assert validate(draft(message="היי, נשמח לעזור עם טיסת היכרות. מתי נוח לך, שישי או שבת?")) == []
+
+    def test_reply_keeps_other_non_latin_scripts(self) -> None:
+        validate = make_messaging_validator(self.business, self.lead, "Здравствуйте, сколько стоит урок?")
+        assert validate(draft(message="Hi, thanks for writing!"))
+        assert validate(draft(message="Здравствуйте! Когда вам удобно поговорить?")) == []
+
+    def test_latin_brand_names_in_a_hebrew_reply_pass(self) -> None:
+        validate = make_messaging_validator(self.business, self.lead, "שלום, אני מתעניין")
+        assert validate(draft(message="היי, תודה שפנית ל-Jenia Aviation! מתי נוח לדבר?")) == []
+
+    def test_latin_or_short_lead_message_sets_no_script(self) -> None:
+        for message in ("Hola, cuánto cuesta?", "hi", None):
+            validate = make_messaging_validator(self.business, self.lead, message)
+            assert validate(draft()) == []

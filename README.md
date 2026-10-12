@@ -37,6 +37,7 @@ Create the tables by pasting the files in `db/` into the Supabase SQL editor, in
 | `002_users.sql` | `users` (app profile; `id` is the Supabase Auth user id) |
 | `003_lock_down_data_api.sql` | RLS on, publishable key gets no access, secret key (`service_role`) gets full access |
 | `004_functions.sql` | `save_lead` (lead + activities + job in one transaction), the AI job queue, the per-business lock, `claim_ingest_event` (webhook idempotency) |
+| `005_auto_send.sql` | Auto-send columns for databases created before them (`whatsapp_accounts.auto_send_after_minutes`, `reply_drafts.auto_send_at`) |
 
 Every file is safe to run again. To change the schema, edit or add a file in `db/`, run it in the SQL editor, and
 update the matching row model in `app/models/`. A new table also goes into `003_lock_down_data_api.sql`.

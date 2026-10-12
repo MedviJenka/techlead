@@ -9,6 +9,8 @@ from crewai.project.utils import cache as memo_cache
 from ai.crews import ConversationCrew, LeadIntelligenceCrew, ManagementCrew, SalesAssistantFlow
 from ai.data.sample_store import InMemoryLeadStore
 from ai.schemas import (
+    ActivitySnapshot,
+    ActivityType,
     AIScoreResult,
     Channel,
     ConversationAnalysis,
@@ -112,6 +114,25 @@ class TestConversationCrew:
         draft = crew.draft_followup(tomer, Channel.WHATSAPP, recommendation=call_now())
 
         assert draft == good
+        assert llm.calls == ["generate_followup_task", "generate_followup_task"]
+
+    def test_followup_to_hebrew_message_in_english_is_retried(
+        self, store: InMemoryLeadStore, tomer: LeadSnapshot
+    ) -> None:
+        wrote = ActivitySnapshot(id="a1", business_id=BUSINESS_ID, lead_id=tomer.id,
+                                 activity_type=ActivityType.WHATSAPP_RECEIVED, channel=Channel.WHATSAPP,
+                                 description="WhatsApp message received", created_at=datetime.now(UTC),
+                                 metadata={"body": "היי, בדקתי עם השותף שלי. אפשר לדבר ביום ראשון?"})
+        english = FollowupDraft(channel=Channel.WHATSAPP, objective="Book call", tone="warm",
+                                message="Hi Tomer, great — does Sunday at 10:00 or 14:00 work for you?")
+        hebrew = FollowupDraft(channel=Channel.WHATSAPP, objective="Book call", tone="warm",
+                               message="היי תומר, מעולה. ראשון ב-10:00 או ב-14:00 מתאים לך?")
+        llm = ScriptedLLM({"generate_followup_task": [english, hebrew]})
+        crew = make_crew(ConversationCrew, store, llm)
+
+        draft = crew.draft_followup(tomer, Channel.WHATSAPP, activities=[wrote])
+
+        assert draft == hebrew
         assert llm.calls == ["generate_followup_task", "generate_followup_task"]
 
 

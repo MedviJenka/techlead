@@ -19,7 +19,7 @@ from ai.schemas.lead import render_activities
 from ai.tools import GetBusinessConfigurationTool, GetLeadActivitiesTool, GetLeadTool
 from app.core.logger import Logger
 
-logger = Logger(__name__)
+logger = Logger("lead-intelligence-crew")
 
 
 class LeadIntelligenceResult(BaseModel):

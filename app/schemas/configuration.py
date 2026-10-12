@@ -13,7 +13,7 @@ from ai.schemas.enums import Priority
 from app.core.logger import Logger
 from app.ingestion.normalize import is_phone_region
 
-logger = Logger(__name__)
+logger = Logger("configuration-schema")
 
 MAX_SCORING_RULES = 50
 MAX_RULE_CONDITIONS = 5

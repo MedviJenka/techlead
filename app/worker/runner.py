@@ -18,7 +18,7 @@ from app.core.errors import NotFoundError
 from app.core.logger import Logger
 from app.models import AnalysisJob
 
-logger = Logger(__name__)
+logger = Logger("worker-runner")
 
 _MAX_ERROR_LENGTH = 2000
 

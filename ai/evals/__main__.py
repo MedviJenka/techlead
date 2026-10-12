@@ -11,7 +11,6 @@ Exits 1 when the pass rate is below --min-pass-rate or the score ranking is wron
 import argparse
 import sys
 from pathlib import Path
-
 from ai.config import LLMSettings
 from ai.crews import AIRuntime, LeadIntelligenceCrew
 from ai.data.sample_store import SAMPLE_BUSINESS, load_sample_store

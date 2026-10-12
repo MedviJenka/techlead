@@ -8,6 +8,14 @@ import { AiTag, Button, Icon } from './ui'
 
 const OPEN = new Set<ReplyDraft['status']>(['pending_approval', 'awaiting_edit', 'failed'])
 
+const DECIDED_VIA: Record<NonNullable<ReplyDraft['decided_via']>, string> = {
+  whatsapp: 'via WhatsApp',
+  dashboard: 'via dashboard',
+  auto: 'automatically, no decision in time',
+}
+
+const clockTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
 const STATUS_LABEL: Record<ReplyDraft['status'], string> = {
   pending_approval: 'Waiting for approval',
   awaiting_edit: 'Being edited on WhatsApp',
@@ -39,7 +47,8 @@ export function ReplyDraftCard({ businessId, draft, leadName }: { businessId: st
         <span className={`font-mono text-[11px] ${draft.status === 'failed' ? 'text-danger' : 'text-ink-subtle'}`}>
           {STATUS_LABEL[draft.status]}
           {draft.status === 'sent' && draft.sent_at && ` ${relativeTime(draft.sent_at)}`}
-          {draft.decided_via && draft.status !== 'awaiting_edit' && ` · via ${draft.decided_via}`}
+          {draft.decided_via && draft.status !== 'awaiting_edit' && ` · ${DECIDED_VIA[draft.decided_via]}`}
+          {draft.status === 'pending_approval' && draft.auto_send_at && ` · sends automatically at ${clockTime(draft.auto_send_at)}`}
           {draft.edited && ' · edited'}
         </span>
         <span className="ml-auto font-mono text-[11px] text-ink-subtle">{relativeTime(draft.created_at)}</span>

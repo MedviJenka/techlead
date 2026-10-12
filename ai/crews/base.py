@@ -4,13 +4,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
-from typing import Any, Self
-
+from typing import Any, Self, Type
 from crewai import Agent, Crew, CrewOutput, Memory, Process, Task
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.project.utils import cache as memo_cache
+from crewai.types.streaming import CrewStreamingOutput
 from pydantic import BaseModel
-
 from ai.config import LLMResolver, LLMSettings
 from ai.guardrails import Guardrail
 from ai.memory import AgentMemoryStore, MemoryKey
@@ -19,7 +18,8 @@ from ai.schemas import BusinessProfile, ModelTier
 from ai.tools import BusinessScopedTool
 from app.core.logger import Logger
 
-logger = Logger(__name__)
+
+logger = Logger("crews")
 
 
 class CrewExecutionError(RuntimeError):
@@ -28,7 +28,8 @@ class CrewExecutionError(RuntimeError):
 
 @dataclass(frozen=True)
 class AIRuntime:
-    """What every crew needs regardless of business: read access and model tiers.
+    """
+    What every crew needs regardless of business: read access and model tiers.
 
     ``memory`` gives each agent its own memory per business; None (tests, evals) runs agents without one.
     """
@@ -43,13 +44,7 @@ class AIRuntime:
     @classmethod
     def from_env(cls, service: LeadReadService) -> "AIRuntime":
         from settings import get_config  # lazy: importing ai.* must not require a configured environment
-
-        return cls(
-            service,
-            LLMSettings.from_env().resolver(),
-            verbose=get_config().VERBOSE,
-            memory=_memory_store(),
-        )
+        return cls(service, LLMSettings.from_env().resolver(), verbose=get_config().VERBOSE, memory=_memory_store())
 
 
 class BusinessCrew:
@@ -77,14 +72,7 @@ class BusinessCrew:
     def for_business(cls, runtime: AIRuntime, business_id: str) -> Self:
         return cls(runtime.service.get_business(business_id), runtime)
 
-    def make_agent(
-        self,
-        name: str,
-        *,
-        tier: ModelTier,
-        tools: Sequence[type[BusinessScopedTool]] = (),
-        memory: bool = True,
-    ) -> Agent:
+    def make_agent(self, name: str, *, tier: ModelTier, tools: Sequence[Type[BusinessScopedTool]] = (), memory: bool = True) -> Agent:
         """``memory`` gives the agent its own memory for this business when the runtime has a memory store."""
         return Agent(
             config=self.agents_config[name],
@@ -117,7 +105,7 @@ class BusinessCrew:
     def sequential_crew(self) -> Crew:
         return Crew(agents=self.agents, tasks=self.tasks, process=Process.sequential, verbose=self.runtime.verbose)
 
-    def kickoff(self, crew: Crew, inputs: Mapping[str, Any]) -> CrewOutput:
+    def kickoff(self, crew: Crew, inputs: Mapping[str, Any]) -> CrewOutput | CrewStreamingOutput:
         logger.fire("crew_run", business_id=self.business.id, tasks=[task.name for task in crew.tasks])
         try:
             return crew.kickoff(inputs={**self.base_inputs(), **inputs})
@@ -167,7 +155,8 @@ def task_result[M: BaseModel](output: CrewOutput, model: type[M]) -> M:
 
 
 def _forget_memoized(crew_id: int) -> None:
-    """Drop a released crew's @agent/@task results from CrewAI's process-wide memo cache.
+    """
+    Drop a released crew's @agent/@task results from CrewAI's process-wide memo cache.
 
     CrewAI keys that cache by the crew's id(). Without this, the next crew allocated at the same address (any
     business, in the long-running worker) would get the old crew's agents with their tools and memory, and the
@@ -184,7 +173,6 @@ def _memory_store() -> AgentMemoryStore | None:
     """One store per process (it tracks what is already in the bucket); None when AI_MEMORY_BUCKET is unset."""
     from ai.memory import S3ObjectStore
     from settings import get_config
-
     config = get_config()
     objects = S3ObjectStore.from_settings(config)
     return AgentMemoryStore(objects, config.AI_MEMORY_CACHE_DIR) if objects else None

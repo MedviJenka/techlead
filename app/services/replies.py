@@ -2,10 +2,12 @@
 
 The owner decides where they already are: the draft goes to their WhatsApp with Approve / Edit / Reject buttons.
 Edit asks for the reply as they want it; their next message is sent instead. The dashboard is the fallback and uses
-the same ``approve`` / ``reject``. Every decision is a conditional state change, so only the first one counts.
+the same ``approve`` / ``reject``. When the business turned on auto-send, a draft still pending at its ``auto_send_at``
+is sent by the worker (``auto_send``). Every decision is a conditional state change, so only the first one counts.
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -25,7 +27,7 @@ from app.schemas.reply import WhatsAppConnection
 from app.services.lead import LeadService, OutboundChannelMessage
 from settings import Settings
 
-logger = Logger(__name__)
+logger = Logger("replies-service")
 
 UNIQUE_VIOLATION = "23505"
 APPROVE, EDIT, REJECT = "approve", "edit", "reject"
@@ -51,12 +53,23 @@ def lead_label(lead: Lead) -> str:
     return " ".join(filter(None, (lead.first_name, lead.last_name))) or lead.phone or "the lead"
 
 
+def auto_send_minutes(draft: ReplyDraft) -> int | None:
+    """How long after it was drafted the draft is sent by itself; None when it waits for the owner."""
+    if draft.auto_send_at is None:
+        return None
+    return max(round((draft.auto_send_at - draft.created_at).total_seconds() / 60), 1)
+
+
 def approval_text(lead: Lead, draft: ReplyDraft, inbound: str | None) -> str:
-    """The approval request: who wrote, what they wrote (shortened to fit) and the full suggested reply."""
+    """The approval request: who wrote, what they wrote (shortened to fit), the full suggested reply and, with
+    auto-send on, when it goes out by itself.
+    """
     header = f"New WhatsApp lead: {lead_label(lead)}"
     if lead.lead_score is not None:
         header += f"\nScore {lead.lead_score}" + (f" ({lead.priority.value})" if lead.priority else "")
     suggestion = f"\n\nSuggested reply:\n{draft.message}"
+    if (minutes := auto_send_minutes(draft)) is not None:
+        suggestion += f"\n\nSent automatically in {minutes} min unless you decide first."
     room = INTERACTIVE_BODY_MAX_LENGTH - len(header) - len(suggestion) - len('\n\nThey wrote: ""')
     if inbound and room >= _INBOUND_PREVIEW_MIN:
         quote = inbound if len(inbound) <= room else inbound[: room - 1] + "…"
@@ -140,15 +153,22 @@ class ReplyService:
         return await self.drafts.for_lead(business_id, lead_id)
 
     async def create_draft(
-        self, business_id: uuid.UUID, lead_id: uuid.UUID, channel: Channel, message: str, objective: str | None
+        self,
+        business_id: uuid.UUID,
+        lead_id: uuid.UUID,
+        channel: Channel,
+        message: str,
+        objective: str | None,
+        auto_send_at: datetime | None = None,
     ) -> ReplyDraft | None:
-        """None when the lead already has an undecided draft."""
+        """None when the lead already has an undecided draft. ``auto_send_at``: sent by itself then if undecided."""
         values = {
             "business_id": business_id,
             "lead_id": lead_id,
             "channel": channel,
             "message": message,
             "objective": objective,
+            "auto_send_at": auto_send_at,
         }
         return await self.drafts.add(values)
 
@@ -206,13 +226,66 @@ class ReplyService:
     ) -> ReplyDraft:
         """Send the draft (or ``message``, the owner's edit) to the lead and record it on the lead's timeline."""
         draft = await self._require(business_id, draft_id)
-        account = await self.accounts.get(business_id)
+        account, lead = await self._recipient(draft)
+        sent = await self._send(draft, account, lead, (message or draft.message).strip(), via, SENDABLE_DRAFT_STATUSES)
+        if sent is None:
+            raise await self._decided(business_id, draft_id)
+        return sent
+
+    async def auto_send(self, draft: ReplyDraft) -> ReplyDraft | None:
+        """Send a draft nobody decided on by its ``auto_send_at`` and tell the owner. None when it was not sent: a
+        decision came first, the send failed (the draft is ``failed`` and waits on the dashboard), or it cannot be
+        sent at all (``auto_send_at`` is cleared, so the sweep does not try again).
+        """
+        log: dict[str, Any] = {
+            "business_id": str(draft.business_id), "lead_id": str(draft.lead_id), "draft_id": str(draft.id)
+        }
+        try:
+            account, lead = await self._recipient(draft)
+        except DomainError as exc:  # WhatsApp disconnected, or the lead has no phone
+            values = {"auto_send_at": None, "last_error": f"Not sent automatically: {exc.message}"}
+            await self.drafts.transition(draft, {ReplyDraftStatus.PENDING_APPROVAL}, values)
+            logger.fire("reply_auto_send_skipped", level="warning", reason=exc.message, **log)
+            return None
+        try:
+            sent = await self._send(
+                draft, account, lead, draft.message, DecisionChannel.AUTO, {ReplyDraftStatus.PENDING_APPROVAL}
+            )
+        except BadGatewayError:
+            return None
+        if sent is None:  # the owner decided (or tapped Edit) first
+            return None
+        notice = (
+            f"No decision within {auto_send_minutes(draft)} min, so the suggested reply was sent to {lead_label(lead)}."
+        )
+        try:
+            await self.sender.send_text(account.phone_number_id, account.owner_phone, notice)
+        except WhatsAppSendError as exc:
+            logger.fire("owner_answer_failed", level="warning", error=str(exc), **log)
+        return sent
+
+    async def _recipient(self, draft: ReplyDraft) -> tuple[WhatsAppAccount, Lead]:
+        account = await self.accounts.get(draft.business_id)
         if account is None:
             raise ConflictError("WhatsApp is not connected for this business")
-        lead = await self.leads.get(business_id, draft.lead_id)
+        lead = await self.leads.get(draft.business_id, draft.lead_id)
         if lead.phone is None:
             raise UnprocessableError("The lead has no phone number")
-        text = (message or draft.message).strip()
+        return account, lead
+
+    async def _send(
+        self,
+        draft: ReplyDraft,
+        account: WhatsAppAccount,
+        lead: Lead,
+        text: str,
+        via: DecisionChannel,
+        from_statuses: Collection[ReplyDraftStatus],
+    ) -> ReplyDraft | None:
+        """Claim the draft (if it is still in ``from_statuses``) and send ``text``; None when another decision won."""
+        if lead.phone is None:
+            raise UnprocessableError("The lead has no phone number")
+        business_id = draft.business_id
         edited = draft.edited or text != draft.message
         claim = {
             "status": ReplyDraftStatus.SENDING,
@@ -222,9 +295,9 @@ class ReplyService:
             "decided_at": self.now,
             "last_error": None,
         }
-        claimed = await self.drafts.transition(draft, SENDABLE_DRAFT_STATUSES, claim)
+        claimed = await self.drafts.transition(draft, from_statuses, claim)
         if claimed is None:
-            raise await self._decided(business_id, draft_id)
+            return None
         log: dict[str, Any] = {
             "business_id": str(business_id), "lead_id": str(lead.id), "draft_id": str(draft.id), "via": via.value
         }

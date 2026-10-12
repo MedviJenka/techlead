@@ -17,7 +17,7 @@ type Validator[M: BaseModel] = Callable[[M], list[str]]
 type Guardrail = Callable[[TaskOutput], tuple[bool, Any]]
 
 
-logger = Logger(__name__)
+logger = Logger("guardrails")
 
 
 def extract_model[M: BaseModel](output: TaskOutput, model: type[M]) -> M:

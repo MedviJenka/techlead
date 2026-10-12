@@ -53,7 +53,8 @@ class BusinessProfile(BaseModel):
             f"Autonomy level: {self.ai.autonomy_level.value} ({self.ai.autonomy_level.name})",
             f"Allowed next actions: {', '.join(a.value for a in self.ai.allowed_actions)}",
             f"Actions that require human approval: {', '.join(a.value for a in self.ai.approval_required_actions)}",
-            f"Communication tone: {self.ai.tone}; language: {self.ai.language}",
+            f"Communication tone: {self.ai.tone}; default language: {self.ai.language} (reply in the lead's language "
+            "when they write in another)",
         ]
         if self.ai.instructions:
             lines.append(f"Business instructions: {self.ai.instructions}")
