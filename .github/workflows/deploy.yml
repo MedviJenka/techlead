@@ -1,0 +1,71 @@
+name: Deploy
+
+# Continuous deployment to the GCP VM: build the images, push them to Artifact Registry, then pull and restart
+# the stack on the VM over IAP SSH. Runs only after CI passes on main, or by hand (any branch, for practice).
+#
+# Repo variables (Settings → Secrets and variables → Actions → Variables):
+#   GCP_PROJECT, GCP_REGION, GCP_ZONE, GCP_VM, GCP_DEPLOY_SA,
+#   GCP_WIF_PROVIDER = projects/<number>/locations/global/workloadIdentityPools/github/providers/github
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write  # Workload Identity Federation: GitHub logs in to GCP without a JSON key
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT }}/techlead
+  TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Log Docker in to Artifact Registry
+        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      - name: Build and push images
+        run: |
+          docker build --target api    -t "$REGISTRY/backend:$TAG"  .
+          docker build --target worker -t "$REGISTRY/worker:$TAG"   .
+          docker build                 -t "$REGISTRY/frontend:$TAG" frontend
+          for image in backend worker frontend; do docker push "$REGISTRY/$image:$TAG"; done
+
+      - name: Roll out on the VM
+        run: |
+          vm=(--zone "${{ vars.GCP_ZONE }}" --tunnel-through-iap --quiet)
+          gcloud compute scp compose.prod.yaml ops/nginx/nginx.conf "${{ vars.GCP_VM }}:/opt/techlead/" "${vm[@]}"
+          gcloud compute ssh "${{ vars.GCP_VM }}" "${vm[@]}" --command "
+            set -e
+            cd /opt/techlead
+            export REGISTRY='$REGISTRY' TAG='$TAG'
+            docker compose -f compose.prod.yaml pull
+            docker compose -f compose.prod.yaml up -d --remove-orphans
+            docker image prune -f"
+
+      - name: Smoke test
+        run: |
+          gcloud compute ssh "${{ vars.GCP_VM }}" --zone "${{ vars.GCP_ZONE }}" --tunnel-through-iap --quiet \
+            --command "curl -fsS --retry 10 --retry-delay 3 --retry-all-errors http://localhost/api/v1/health"

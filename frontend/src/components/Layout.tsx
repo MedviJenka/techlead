@@ -8,6 +8,7 @@ import { useBusiness, useHealth, useMe } from '../api/hooks'
 import { supabase, useSession } from '../auth/supabase'
 import { LoginPage } from '../pages/LoginPage'
 import { initials } from './leadDisplay'
+import { NewLeadAlerts } from './NewLeadAlerts'
 import { Icon, Logo, PulseDot, Sparkle } from './ui'
 import { spring } from './motion'
 
@@ -303,6 +304,7 @@ function Shell({ session }: { session: Session }) {
         </main>
       </div>
       <MobileTabs businessId={businessId} />
+      {businessId && <NewLeadAlerts key={businessId} businessId={businessId} />}
     </div>
   )
 }
