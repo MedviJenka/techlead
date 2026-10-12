@@ -93,7 +93,9 @@ async def drafted(replies: ReplyService, business: Business, lead: Lead, message
 # --- receiving ---
 
 
-async def test_first_message_creates_a_whatsapp_lead_queued_for_analysis(service: LeadService, business: Business, store: FakeStore) -> None:
+async def test_first_message_creates_a_whatsapp_lead_queued_for_analysis(
+    service: LeadService, business: Business, store: FakeStore
+) -> None:
     received = await service.receive_message(business.id, inbound())
 
     assert received is not None
