@@ -1,0 +1,63 @@
+evaluate_analysis_task:
+  description: >
+    Evaluate a ConversationAnalysis that an AI produced from an inbound {channel} message to
+    {business_name}.
+
+    Message received at {received_at}:
+    """
+    {message}
+    """
+
+    Lead record (JSON):
+    {lead_json}
+
+    Recent activity:
+    {activities}
+
+    Business rules:
+    {business_rules}
+
+    The analysis to evaluate (JSON):
+    {response_json}
+
+    Grade it with the analysis-evaluation skill and the evaluation-rubric. Check every extracted value
+    against the message, resolve relative dates against the message timestamp yourself, and list what
+    the customer said that the analysis missed.
+  expected_output: >
+    A ResponseEvaluation with an overall score, confidence_level, a score per rubric criterion,
+    every anomaly with its evidence, and a short output_notice.
+  agent: response_evaluator
+
+evaluate_followup_task:
+  description: >
+    Evaluate a FollowupDraft that an AI wrote on the {channel} channel for a lead of {business_name}.
+
+    Current time: {now}
+
+    Business rules (tone is binding):
+    {business_rules}
+
+    The lead's latest message:
+    """
+    {lead_message}
+    """
+
+    Lead record (JSON):
+    {lead_json}
+
+    Conversation and activity history:
+    {activities}
+
+    Conversation insights the writer had:
+    {conversation_insights}
+
+    The draft to evaluate (JSON):
+    {response_json}
+
+    Grade it with the follow-up-evaluation skill and the evaluation-rubric. Any price, discount,
+    availability or promise that is not in the context above is a hallucination, and any claim that
+    something was already sent, booked or done is a policy violation.
+  expected_output: >
+    A ResponseEvaluation with an overall score, confidence_level, a score per rubric criterion,
+    every anomaly with its evidence, and a short output_notice.
+  agent: response_evaluator

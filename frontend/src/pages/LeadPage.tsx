@@ -423,7 +423,7 @@ function LeadEditor({ businessId, lead }: { businessId: string; lead: LeadDetail
         </div>
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-muted">
           Notes
-          <textarea className={`${inputClass} h-auto py-2`} name="notes" defaultValue={lead.notes ?? ''} rows={4} />
+          <textarea dir="auto" className={`${inputClass} h-auto py-2`} name="notes" defaultValue={lead.notes ?? ''} rows={4} />
         </label>
         {update.isError && <ErrorState message={update.error.message} />}
         <Button type="submit" icon={update.isPending ? 'progress_activity' : 'save'} disabled={update.isPending} className="w-full">

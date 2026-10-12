@@ -40,7 +40,7 @@ export function ReplyDraftCard({ businessId, draft, leadName }: { businessId: st
       <div className="flex flex-wrap items-center gap-2">
         <AiTag label="AI draft" />
         {leadName && (
-          <Link to={`/businesses/${businessId}/leads/${draft.lead_id}`} className="font-semibold hover:text-primary">
+          <Link to={`/businesses/${businessId}/leads/${draft.lead_id}`} dir="auto" className="font-semibold hover:text-primary">
             {leadName}
           </Link>
         )}
@@ -56,6 +56,7 @@ export function ReplyDraftCard({ businessId, draft, leadName }: { businessId: st
 
       {editing ? (
         <textarea
+          dir="auto"
           className={`${inputClass} h-auto w-full py-2`}
           rows={4}
           value={text}
@@ -65,7 +66,7 @@ export function ReplyDraftCard({ businessId, draft, leadName }: { businessId: st
           autoFocus
         />
       ) : (
-        <p className={`rounded-sm bg-canvas p-3 whitespace-pre-wrap ${draft.status === 'rejected' ? 'text-ink-subtle line-through' : ''}`}>
+        <p dir="auto" className={`rounded-sm bg-canvas p-3 whitespace-pre-wrap ${draft.status === 'rejected' ? 'text-ink-subtle line-through' : ''}`}>
           {draft.message}
         </p>
       )}

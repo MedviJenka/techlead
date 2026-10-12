@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
+from typing import Optional
 from crewai import LLM
 from crewai.llms.base_llm import BaseLLM
 from ai.schemas import ModelTier
@@ -13,7 +14,7 @@ class LLMSettings:
 
     reasoning_model: str
     fast_model: str
-    temperature: float | None = None  # None: the provider's default (reasoning models accept no other)
+    temperature: Optional[float] = None  # None: the provider's default (reasoning models accept no other)
     timeout_seconds: float = 60.0
 
     @classmethod

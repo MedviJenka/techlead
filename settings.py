@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     AI_PRICE_INPUT_PER_MTOK:             Optional[float] = Field(default=None, description="USD per million prompt tokens of the reasoning model; with the output price, each AI run's cost is recorded in dollars")
     AI_PRICE_CACHED_INPUT_PER_MTOK:      Optional[float] = Field(default=None, description='USD per million cached prompt tokens; unset bills them at the input price')
     AI_PRICE_OUTPUT_PER_MTOK:            Optional[str]   = Field(default=None, description='USD per million completion tokens of the reasoning model')
-    AI_TEMPERATURE:                      Optional[str]   = Field(default=None, description="sampling temperature for every agent; unset sends none (reasoning models such as gpt-5 reject anything but the default)")
+    AI_TEMPERATURE:                      Optional[float] = Field(default=None, description="sampling temperature for every agent; unset sends none (reasoning models such as gpt-5 reject anything but the default)")
     OPENAI_API_KEY:                      Optional[str]   = Field(default=None, description='')
     LOGFIRE_TOKEN:                       Optional[str]   = Field(default=None, description='')
     SUPABASE_PROJECT_URL:                Optional[str]   = Field(default=None, description='Supabase project URL (https://<ref>.supabase.co); the app database')
