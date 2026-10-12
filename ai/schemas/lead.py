@@ -86,3 +86,18 @@ def render_activities(activities: list[ActivitySnapshot], limit: int = 20) -> st
         f"{'/' + a.channel.value if a.channel else ''}] {a.description}"
         for a in recent
     )
+
+
+INBOUND_MESSAGE_TYPES: frozenset[ActivityType] = frozenset(
+    {ActivityType.WHATSAPP_RECEIVED, ActivityType.EMAIL_RECEIVED}
+)
+
+
+def latest_lead_message(lead: LeadSnapshot, activities: list[ActivitySnapshot]) -> str | None:
+    """The text the lead wrote most recently (an inbound message, else the lead's notes): what a reply answers."""
+    inbound = sorted((a for a in activities if a.activity_type in INBOUND_MESSAGE_TYPES), key=lambda a: a.created_at)
+    for activity in reversed(inbound):
+        body = activity.metadata.get("body")
+        if isinstance(body, str) and body.strip():
+            return body.strip()
+    return lead.notes.strip() if lead.notes and lead.notes.strip() else None

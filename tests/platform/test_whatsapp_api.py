@@ -182,6 +182,19 @@ async def test_connect_whatsapp_then_read_the_status(
     assert (await dashboard.get(url)).json()["connection"] is None
 
 
+async def test_auto_send_is_off_until_a_timeout_is_set(
+    dashboard: AsyncClient, api_prefix: str, business: Business
+) -> None:
+    url = f"{api_prefix}/businesses/{business.id}/whatsapp"
+    connection = {"phone_number_id": "1098765432", "owner_phone": "+972501111111"}
+    assert (await dashboard.put(url, json=connection)).json()["auto_send_after_minutes"] is None
+
+    saved = await dashboard.put(url, json=connection | {"auto_send_after_minutes": 10})
+    assert saved.json()["auto_send_after_minutes"] == 10
+    for minutes in (0, 24 * 60 + 1):
+        assert (await dashboard.put(url, json=connection | {"auto_send_after_minutes": minutes})).status_code == 422
+
+
 async def test_owner_phone_must_be_international(dashboard: AsyncClient, api_prefix: str, business: Business) -> None:
     url = f"{api_prefix}/businesses/{business.id}/whatsapp"
     response = await dashboard.put(url, json={"phone_number_id": "1098765432", "owner_phone": "0501111111"})

@@ -9,7 +9,6 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-
 from ai.ports import NotFoundError
 from ai.schemas import (
     ActivitySnapshot,
@@ -22,11 +21,15 @@ from ai.schemas import (
     PipelineMetrics,
 )
 
+
 SAMPLE_LEADS_PATH = Path(__file__).resolve().parents[2] / "docs" / "files" / "sample_raw_leads.json"
+
 SAMPLE_BUSINESS = BusinessProfile(id="biz_techlead", slug="techlead", name="Techlead", industry="saas")
 
 STALE_AFTER = timedelta(days=5)
+
 HOT_PRIORITIES = frozenset({"high", "critical"})
+
 CLOSED_STATUSES = frozenset({"won", "lost", "closed_won", "closed_lost"})
 
 _CHANNEL_ALIASES: dict[str, Channel] = {"whatsapp": Channel.WHATSAPP, "email": Channel.EMAIL, "phone": Channel.PHONE}

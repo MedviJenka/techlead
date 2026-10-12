@@ -10,6 +10,7 @@ from ai.schemas import ActivitySnapshot, BusinessProfile, LeadSearchFilter, Lead
 
 
 class SingleLeadReadService:
+
     def __init__(self, business: BusinessProfile, lead: LeadSnapshot, activities: list[ActivitySnapshot]) -> None:
         self._business = business
         self._lead = lead

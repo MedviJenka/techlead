@@ -6,7 +6,7 @@ from pydantic import BaseModel, PrivateAttr
 from ai.ports import LeadReadService, NotFoundError
 from app.core.logger import Logger
 
-logger = Logger(__name__)
+logger = Logger("ai-tools")
 
 
 class NoArguments(BaseModel):

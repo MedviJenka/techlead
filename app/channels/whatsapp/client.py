@@ -13,7 +13,7 @@ import httpx
 
 from app.core.logger import Logger
 
-logger = Logger(__name__)
+logger = Logger("whatsapp-client")
 
 GRAPH_URL = "https://graph.facebook.com"
 TEXT_MAX_LENGTH = 4096

@@ -1,18 +1,12 @@
-"""Boundary between the AI layer and the application.
+"""
+Boundary between the AI layer and the application.
 
 CrewAI tools only talk to the application through this read-only protocol. Every call is
 business-scoped; implementations must enforce tenant isolation. Writes never go through here.
 """
 
 from typing import Protocol
-
-from ai.schemas import (
-    ActivitySnapshot,
-    BusinessProfile,
-    LeadSearchFilter,
-    LeadSnapshot,
-    PipelineMetrics,
-)
+from ai.schemas import ActivitySnapshot, BusinessProfile, LeadSearchFilter, LeadSnapshot, PipelineMetrics
 
 
 class NotFoundError(LookupError):
@@ -20,6 +14,7 @@ class NotFoundError(LookupError):
 
 
 class LeadReadService(Protocol):
+
     def get_business(self, business_id: str) -> BusinessProfile: ...
 
     def get_lead(self, business_id: str, lead_id: str) -> LeadSnapshot: ...

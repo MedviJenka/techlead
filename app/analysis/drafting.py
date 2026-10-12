@@ -13,7 +13,7 @@ from app.core.logger import Logger
 if TYPE_CHECKING:
     from ai.config import LLMResolver
 
-logger = Logger(__name__)
+logger = Logger("drafting")
 
 
 class ReplyDrafter(Protocol):

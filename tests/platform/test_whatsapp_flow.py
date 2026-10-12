@@ -3,13 +3,13 @@ the owner approves, edits or rejects it on their phone (or the dashboard), and t
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
 from ai.schemas import Channel, FollowupDraft, NextActionRecommendation
-from ai.schemas.enums import ActivityType
+from ai.schemas.enums import ActivityType, FitLevel
 from app.analysis.drafting import CrewReplyDrafter
 from app.analysis.first_reply import FirstReply
 from app.analysis.flow import NewLeadFlow
@@ -19,6 +19,7 @@ from app.models import Business, DecisionChannel, IngestStatus, Lead, ReplyDraft
 from app.services.inbox import InboxError, WhatsAppInbox
 from app.services.lead import InboundChannelMessage, LeadService
 from app.services.replies import ApprovalTemplate, ReplyService, approval_text, parse_decision
+from app.worker.auto_send import AutoSender
 from tests.fakes import ScriptedLLM
 from tests.platform.memory import (
     NOW,
@@ -33,7 +34,7 @@ from tests.platform.memory import (
     make_replies,
     make_service,
 )
-from tests.platform.test_analysis import FakeEngine
+from tests.platform.test_analysis import QUALIFIED, FakeEngine
 from tests.platform.test_whatsapp_channel import button_reply, delivery, text
 
 LEAD_PHONE = "+972521234567"
@@ -488,3 +489,135 @@ async def test_real_conversation_crew_drafts_the_first_reply(
     assert draft is not None and draft.message == reply.message
     assert drafts.only().objective == "Learn the area"
     assert sender.sent[0][2].endswith(reply.message)
+
+
+# --- auto-send: the worker sends a first reply the owner did not decide on in time ---
+
+AUTO_SEND_MINUTES = 10
+
+
+@pytest.fixture
+def auto_replies(service: LeadService, business: Business, sender: FakeSender) -> ReplyService:
+    account = make_account(business).model_copy(update={"auto_send_after_minutes": AUTO_SEND_MINUTES})
+    return make_replies(service, FakeAccounts(account), sender)
+
+
+def auto_sender(replies: ReplyService, at: datetime) -> AutoSender:
+    """A sweep at ``at``, sending with ``replies`` (its drafts are the sweep's drafts)."""
+    replies.now = at
+    return AutoSender(replies.drafts, lambda now: replies, lambda: at)
+
+
+async def auto_drafted(service: LeadService, replies: ReplyService, business: Business) -> Any:
+    lead = await new_lead(service, business)
+    flow = NewLeadFlow(service, FakeEngine(), "openai/test", None, first_reply(service, replies, FakeDrafter()))
+    await flow.run(business.id, lead.id)
+    return replies.drafts.only()  # type: ignore[attr-defined]
+
+
+async def test_with_auto_send_on_the_draft_gets_a_deadline_the_owner_is_told_about(
+    service: LeadService, auto_replies: ReplyService, business: Business, sender: FakeSender
+) -> None:
+    draft = await auto_drafted(service, auto_replies, business)
+
+    assert draft.auto_send_at == datetime(2026, 10, 9, 12, 10, 30, tzinfo=UTC)  # drafted at 12:00:30, + 10 min
+    approval = sender.to(OWNER_PHONE)[0]
+    assert approval.endswith(f"Sent automatically in {AUTO_SEND_MINUTES} min unless you decide first.")
+
+
+async def test_with_auto_send_off_the_draft_waits_for_the_owner(
+    service: LeadService, replies: ReplyService, business: Business, sender: FakeSender
+) -> None:
+    draft = await auto_drafted(service, replies, business)
+
+    assert draft.auto_send_at is None
+    assert "automatically" not in sender.to(OWNER_PHONE)[0]
+    assert await auto_sender(replies, datetime(2026, 10, 10, tzinfo=UTC)).run_once() == 0
+
+
+async def test_a_poor_fit_lead_is_never_answered_automatically(
+    service: LeadService, auto_replies: ReplyService, business: Business
+) -> None:
+    lead = await new_lead(service, business)
+    poor = QUALIFIED.model_copy(update={"fit": FitLevel.POOR})
+
+    draft = await first_reply(service, auto_replies, FakeDrafter()).run(business.id, lead.id, None, poor)
+
+    assert draft is not None and draft.auto_send_at is None
+
+
+async def test_an_undecided_draft_is_sent_at_its_deadline_and_the_owner_is_told(
+    service: LeadService, auto_replies: ReplyService, business: Business, sender: FakeSender, store: FakeStore
+) -> None:
+    draft = await auto_drafted(service, auto_replies, business)
+    assert draft.auto_send_at is not None
+
+    assert await auto_sender(auto_replies, draft.auto_send_at - timedelta(seconds=1)).run_once() == 0
+    assert await auto_sender(auto_replies, draft.auto_send_at).run_once() == 1
+
+    sent = auto_replies.drafts.only()  # type: ignore[attr-defined]
+    assert sent.status is ReplyDraftStatus.SENT
+    assert sent.decided_via is DecisionChannel.AUTO
+    assert sender.to(LEAD_PHONE) == ["Hi Dana! Which area are you looking in?"]
+    assert sender.to(OWNER_PHONE)[-1] == (
+        f"No decision within {AUTO_SEND_MINUTES} min, so the suggested reply was sent to Dana Levi."
+    )
+    outbound = [a for a in store.activities if a.activity_type is ActivityType.WHATSAPP_SENT]
+    assert outbound[0].metadata["approved_via"] == "auto"
+    assert await auto_sender(auto_replies, draft.auto_send_at).run_once() == 0  # sent once
+
+
+@pytest.mark.parametrize("decide", ["approve", "reject", "edit"])
+async def test_a_decision_before_the_deadline_wins(
+    service: LeadService, auto_replies: ReplyService, business: Business, sender: FakeSender, decide: str
+) -> None:
+    draft = await auto_drafted(service, auto_replies, business)
+    if decide == "approve":
+        await auto_replies.approve(business.id, draft.id, DecisionChannel.WHATSAPP)
+    elif decide == "reject":
+        await auto_replies.reject(business.id, draft.id, DecisionChannel.WHATSAPP)
+    else:
+        await auto_replies.start_edit(business.id, draft.id)  # the owner is typing their version
+    to_lead = list(sender.to(LEAD_PHONE))
+
+    assert await auto_sender(auto_replies, datetime(2026, 10, 10, tzinfo=UTC)).run_once() == 0
+    assert sender.to(LEAD_PHONE) == to_lead
+    assert auto_replies.drafts.only().decided_via is not DecisionChannel.AUTO  # type: ignore[attr-defined]
+
+
+async def test_the_owner_tapping_approve_after_the_auto_send_is_told_it_was_sent(
+    service: LeadService, auto_replies: ReplyService, business: Business
+) -> None:
+    draft = await auto_drafted(service, auto_replies, business)
+    await auto_sender(auto_replies, draft.auto_send_at).run_once()
+
+    with pytest.raises(ConflictError, match="already sent"):
+        await auto_replies.approve(business.id, draft.id, DecisionChannel.WHATSAPP)
+
+
+async def test_a_failed_auto_send_waits_on_the_dashboard(
+    service: LeadService, auto_replies: ReplyService, business: Business, sender: FakeSender
+) -> None:
+    draft = await auto_drafted(service, auto_replies, business)
+    sender.fail["text"] = WhatsAppSendError("Service temporarily unavailable", 2)
+
+    assert await auto_sender(auto_replies, draft.auto_send_at).run_once() == 0
+
+    failed = auto_replies.drafts.only()  # type: ignore[attr-defined]
+    assert failed.status is ReplyDraftStatus.FAILED
+    assert await auto_sender(auto_replies, draft.auto_send_at).run_once() == 0  # not retried by itself
+
+
+async def test_after_whatsapp_is_disconnected_the_draft_stops_waiting_to_be_sent(
+    service: LeadService, auto_replies: ReplyService, business: Business, sender: FakeSender
+) -> None:
+    draft = await auto_drafted(service, auto_replies, business)
+    await auto_replies.accounts.delete(business.id)
+
+    assert await auto_sender(auto_replies, draft.auto_send_at).run_once() == 0
+
+    waiting = auto_replies.drafts.only()  # type: ignore[attr-defined]
+    assert waiting.status is ReplyDraftStatus.PENDING_APPROVAL
+    assert waiting.auto_send_at is None
+    assert waiting.last_error == "Not sent automatically: WhatsApp is not connected for this business"
+    assert sender.to(LEAD_PHONE) == []

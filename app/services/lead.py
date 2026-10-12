@@ -46,7 +46,7 @@ from app.schemas.lead import (
 from app.schemas.lead_import import ImportEnvelope, ImportOutcome, ImportRecordResult, ImportResult
 from app.services.business import BusinessSettings, require_business
 
-logger = Logger(__name__)
+logger = Logger("lead-service")
 
 # PostgreSQL SQLSTATE class 23: integrity constraint violation (unique, check, foreign key, not null).
 _INTEGRITY_ERROR_CLASS = "23"

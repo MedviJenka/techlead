@@ -22,7 +22,7 @@ from app.models import Lead
 from app.schemas.analysis import RunCost
 from app.services.lead import LeadService
 
-logger = Logger(__name__)
+logger = Logger("analysis-flow")
 
 
 class LeadRoute(StrEnum):
@@ -93,7 +93,7 @@ class NewLeadFlow:
         )
         if self._first_reply is not None:
             try:
-                await self._first_reply.run(business_id, lead_id, result.recommendation)
+                await self._first_reply.run(business_id, lead_id, result.recommendation, result.qualification)
             except Exception as exc:
                 logger.fire(
                     "first_reply_failed", level="error", _exc_info=exc, business_id=str(business_id),

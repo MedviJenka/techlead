@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from ai.config import LLMResolver
     from ai.crews.lead_intelligence.crew import LeadIntelligenceResult
 
-logger = Logger(__name__)
+logger = Logger("analysis-engine")
 
 
 def reasoning_model(config: Settings) -> str:

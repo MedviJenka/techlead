@@ -31,8 +31,13 @@ generate_followup_task:
 
     Current time: {now}
 
-    Business rules (tone and language are binding):
+    Business rules (tone is binding):
     {business_rules}
+
+    The lead's latest message:
+    """
+    {lead_message}
+    """
 
     Lead record (JSON):
     {lead_json}
@@ -45,6 +50,10 @@ generate_followup_task:
 
     Latest conversation insights:
     {conversation_insights}
+
+    Write the message in the language of the lead's latest message, whatever language that is
+    (Hebrew to a lead who wrote in Hebrew, Spanish to one who wrote in Spanish). Use the business's
+    default language only when the lead has not written yet or their language is unclear.
 
     Write one message with a single clear objective and an easy call to action. Do not mention
     prices, amounts, discounts or availability that are not in the data above, and never say that

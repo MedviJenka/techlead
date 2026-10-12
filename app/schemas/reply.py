@@ -2,13 +2,14 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, StringConstraints
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 from ai.schemas.enums import Channel
 from app.ingestion.normalize import Phone, normalize_phone
 from app.models import DecisionChannel, ReplyDraftStatus
 
 REPLY_MAX_LENGTH = 4096
+MAX_AUTO_SEND_MINUTES = 24 * 60  # ck_whatsapp_accounts_auto_send_after_minutes
 
 
 def _international[T: str | None](value: T) -> T:
@@ -36,6 +37,8 @@ class ReplyDraftRead(BaseModel):
     created_at: datetime
     decided_at: datetime | None
     sent_at: datetime | None
+    # When it is sent by itself if nobody decides first (null: it waits for a decision).
+    auto_send_at: datetime | None = None
     # Only in the approval queue (``GET /replies``).
     lead_name: str | None = None
 
@@ -61,6 +64,8 @@ class WhatsAppConnection(BaseModel):
     display_phone: Annotated[Phone, AfterValidator(_international)] = None
     # The owner's own WhatsApp number: approval requests go there, and messages from it are decisions.
     owner_phone: InternationalPhone
+    # A first reply the owner has not decided on within this many minutes is sent by itself; null: never.
+    auto_send_after_minutes: int | None = Field(default=None, ge=1, le=MAX_AUTO_SEND_MINUTES)
 
 
 class WhatsAppConnectionRead(BaseModel):
@@ -69,6 +74,7 @@ class WhatsAppConnectionRead(BaseModel):
     phone_number_id: str
     display_phone: str | None
     owner_phone: str
+    auto_send_after_minutes: int | None
     updated_at: datetime
 
 

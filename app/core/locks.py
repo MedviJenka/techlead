@@ -19,7 +19,7 @@ from supabase import AsyncClient
 from app.core.errors import ServiceUnavailableError
 from app.core.logger import Logger
 
-logger = Logger(__name__)
+logger = Logger("locks")
 
 PROCESS_ID = f"{socket.gethostname()}:{os.getpid()}"
 

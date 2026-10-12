@@ -8,7 +8,7 @@ from app.core.logger import Logger
 from app.schemas import HealthStatus
 
 router = APIRouter(tags=["health"])
-logger = Logger(__name__)
+logger = Logger("health-api")
 
 
 @router.get("/health", response_model=HealthStatus)

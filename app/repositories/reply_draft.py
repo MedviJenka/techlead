@@ -15,7 +15,8 @@ _MAX_ERROR_LENGTH = 2000
 
 
 class ReplyDraftRepository:
-    """AI-drafted replies awaiting the owner. Tenant-scoped: every query filters ``business_id``.
+    """AI-drafted replies awaiting the owner. Tenant-scoped: every query filters ``business_id``, except the worker's
+    ``due_for_auto_send`` sweep.
 
     State changes are conditional updates (``WHERE status IN ...``), so two decisions on one draft (a double tap,
     or the phone and the dashboard at once) never both win.
@@ -87,6 +88,21 @@ class ReplyDraftRepository:
         """The draft whose new text the owner is typing (the latest one they tapped Edit on)."""
         drafts = await self.with_status(business_id, [ReplyDraftStatus.AWAITING_EDIT], 1)
         return drafts[0] if drafts else None
+
+    async def due_for_auto_send(self, now: datetime, limit: int) -> list[ReplyDraft]:
+        """Pending drafts whose ``auto_send_at`` has passed, oldest first, across every business: the worker's
+        auto-send sweep (each draft carries its ``business_id``, and sending it is a conditional ``transition``).
+        """
+        response = (
+            await self._db.table("reply_drafts")
+            .select("*")
+            .eq("status", ReplyDraftStatus.PENDING_APPROVAL.value)
+            .lte("auto_send_at", now.isoformat())
+            .order("auto_send_at")
+            .limit(limit)
+            .execute()
+        )
+        return [ReplyDraft.model_validate(row) for row in response.data]
 
     async def transition(
         self, draft: ReplyDraft, from_statuses: Collection[ReplyDraftStatus], values: dict[str, Any]

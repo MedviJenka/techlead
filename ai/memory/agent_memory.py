@@ -31,7 +31,7 @@ from app.core.logger import Logger
 _SEGMENT = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
-logger = Logger(__name__)
+logger = Logger("agent-memory")
 
 
 @dataclass(frozen=True)

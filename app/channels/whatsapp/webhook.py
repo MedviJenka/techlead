@@ -14,7 +14,7 @@ from typing import Any
 from app.core.logger import Logger
 from app.ingestion.normalize import normalize_phone
 
-logger = Logger(__name__)
+logger = Logger("whatsapp-webhook")
 
 SIGNATURE_PREFIX = "sha256="
 

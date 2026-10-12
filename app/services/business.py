@@ -17,7 +17,7 @@ from app.schemas.configuration import (
     stored_definitions,
 )
 
-logger = Logger(__name__)
+logger = Logger("business-service")
 
 UNIQUE_VIOLATION = "23505"
 

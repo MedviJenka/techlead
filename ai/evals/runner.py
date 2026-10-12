@@ -12,7 +12,7 @@ from ai.evals.cases import RANKING, EvalCase
 from ai.schemas import Priority
 from app.core.logger import Logger
 
-logger = Logger(__name__)
+logger = Logger("evals")
 
 
 class CaseResult(BaseModel):

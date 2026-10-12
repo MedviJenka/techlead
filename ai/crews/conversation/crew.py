@@ -15,7 +15,7 @@ from ai.schemas import (
     ModelTier,
     NextActionRecommendation,
 )
-from ai.schemas.lead import render_activities
+from ai.schemas.lead import latest_lead_message, render_activities
 from ai.tools import GetBusinessConfigurationTool, GetLeadActivitiesTool, GetLeadTool
 
 
@@ -62,12 +62,14 @@ class ConversationCrew(BusinessCrew):
         insights: ConversationAnalysis | None = None,
         activities: Sequence[ActivitySnapshot] = (),
     ) -> FollowupDraft:
+        lead_message = latest_lead_message(lead, list(activities))
         inputs = {
             "channel": channel.value,
+            "lead_message": lead_message or "None: the lead has not written yet.",
             "lead_json": lead.to_prompt_json(),
             "activities": render_activities(list(activities)),
             "next_action": recommendation.model_dump_json(indent=1) if recommendation else "None provided.",
             "conversation_insights": insights.model_dump_json(indent=1) if insights else "None available.",
         }
-        guardrail = make_messaging_guardrail(self.business, lead)
+        guardrail = make_messaging_guardrail(self.business, lead, lead_message)
         return self.run_step(self.followup_agent(), "generate_followup_task", FollowupDraft, inputs, [guardrail])

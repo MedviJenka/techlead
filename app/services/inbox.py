@@ -18,7 +18,7 @@ from app.repositories import IngestEventRepository, WhatsAppAccountRepository
 from app.services.lead import InboundChannelMessage, LeadService
 from app.services.replies import ReplyService
 
-logger = Logger(__name__)
+logger = Logger("inbox-service")
 
 SOURCE = "whatsapp"
 # Message types that carry nothing for the lead's history.

@@ -6,7 +6,7 @@ from app.core.errors import register_exception_handlers
 from app.core.logger import Logger, configure_logging
 from settings import get_config
 
-logger = Logger(__name__)
+logger = Logger("api")
 
 
 def create_app() -> FastAPI:

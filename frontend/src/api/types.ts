@@ -220,17 +220,21 @@ export type ReplyDraft = {
   objective: string | null
   status: ReplyDraftStatus
   edited: boolean
-  decided_via: 'whatsapp' | 'dashboard' | null
+  decided_via: 'whatsapp' | 'dashboard' | 'auto' | null
   last_error: string | null
   created_at: string
   decided_at: string | null
   sent_at: string | null
+  // When it is sent by itself if nobody decides first (null: it waits for a decision).
+  auto_send_at: string | null
   lead_name?: string | null
 }
 export type WhatsAppConnection = {
   phone_number_id: string
   display_phone?: string | null
   owner_phone: string
+  // An undecided first reply is sent by itself after this many minutes; null: never.
+  auto_send_after_minutes?: number | null
 }
 export type WhatsAppStatus = {
   connection: (Required<WhatsAppConnection> & { updated_at: string }) | null
