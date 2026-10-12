@@ -68,9 +68,18 @@ def main() -> int:
         deadline = time.monotonic() + args.wait * 60
         if args.wait:
             print(f"\nwatching for up to {args.wait:g} min (Ctrl+C to stop)...")
+        unreachable = False
         while time.monotonic() < deadline:
             time.sleep(POLL_SECONDS)
-            new = [m for m in mock.get("/mock/messages").json() if m["id"] not in seen and m["direction"] == "outbound"]
+            try:
+                messages = mock.get("/mock/messages").json()
+            except httpx.TransportError:
+                if not unreachable:
+                    print(f"\nthe mock stopped answering at {args.mock}; still trying (it keeps messages in memory only).")
+                unreachable = True
+                continue
+            unreachable = False
+            new = [m for m in messages if m["id"] not in seen and m["direction"] == "outbound"]
             for message in new:
                 seen.add(message["id"])
                 _show(message, sender)
