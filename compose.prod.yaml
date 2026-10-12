@@ -1,0 +1,41 @@
+# Production stack on the GCP VM: same services as compose.yaml, but images come from Artifact Registry
+# (built by .github/workflows/deploy.yml) instead of being built on the machine.
+# REGISTRY and TAG are exported by the deploy job; secrets live in /opt/techlead/.env on the VM, never in GitHub.
+name: techlead
+
+services:
+
+  nginx:
+    container_name: techlead-nginx
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+  backend:
+    container_name: techlead-backend
+    image: ${REGISTRY:?}/backend:${TAG:?}
+    env_file: .env
+    restart: unless-stopped
+
+  worker:
+    container_name: techlead-worker
+    image: ${REGISTRY:?}/worker:${TAG:?}
+    env_file: .env
+    restart: unless-stopped
+
+  # NOT-PRODUCTION: still the Vite dev server image (see frontend/Dockerfile). Fine for practising CD.
+  frontend:
+    container_name: techlead-frontend
+    image: ${REGISTRY:?}/frontend:${TAG:?}
+    env_file: .env
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
