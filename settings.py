@@ -1,14 +1,13 @@
 import json
 from functools import cache
 from pathlib import Path
-from typing import Annotated, Any
-
+from typing import Annotated, Any, Optional
 from pydantic import BeforeValidator, Field
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 def _parse_origins(value: Any) -> Any:
-    """Accept CORS origins as a JSON list (``["http://a", "http://b"]``) or CSV (``http://a,http://b``)."""
+    """Accept CORS origins as a JSON list"""
     if not isinstance(value, str):
         return value
     stripped = value.strip()
@@ -24,40 +23,40 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=Path(__file__).parent / ".env", extra="allow")
 
-    APP_ENV:                       str             = Field(default='dev',description='')
-    API_VERSION:                   str             = Field(default='v1', description='version segment of the API prefix (/api/{API_VERSION})')
-    VERBOSE:                       bool            = Field(default=True, description='crew ai agent verbose')
-    GOOGLE_SHEETS:                 str | None   = Field(default=None, description='')
-    OPENAI_MODEL:                  str             = Field(...,          description='')
-    AI_REASONING_MODEL:            str | None   = Field(default=None, description='model for qualification/strategy agents; falls back to OPENAI_MODEL')
-    AI_FAST_MODEL:                 str | None   = Field(default=None, description='model for extraction/classification agents; falls back to OPENAI_MODEL')
-    AI_PRICE_INPUT_PER_MTOK:       float | None = Field(default=None, description="USD per million prompt tokens of the reasoning model; with the output price, each AI run's cost is recorded in dollars")
-    AI_PRICE_CACHED_INPUT_PER_MTOK: float | None = Field(default=None, description='USD per million cached prompt tokens; unset bills them at the input price')
-    AI_PRICE_OUTPUT_PER_MTOK:      float | None = Field(default=None, description='USD per million completion tokens of the reasoning model')
-    AI_TEMPERATURE:                float | None = Field(default=None, description="sampling temperature for every agent; unset sends none (reasoning models such as gpt-5 reject anything but the default)")
-    OPENAI_API_KEY:                str | None   = Field(default=None, description='')
-    LOGFIRE_TOKEN:                 str | None   = Field(default=None, description='')
-    SUPABASE_PROJECT_URL:          str | None   = Field(default=None, description='Supabase project URL (https://<ref>.supabase.co); the app database')
-    SUPABASE_PUBLISHABLE_KEY:      str | None   = Field(default=None, description='public key; given to the frontend (Google sign-in), not used by the backend')
-    SUPABASE_SECRET_KEY:           str | None   = Field(default=None, description='secret (service_role) key the backend uses for every database call; keep server-side')
-    SUPABASE_JWKS_URL:             str | None   = Field(default=None, description='Supabase Auth public keys, to verify user login tokens; defaults to <SUPABASE_PROJECT_URL>/auth/v1/.well-known/jwks.json')
-    TEST_SUPABASE_URL:             str | None   = Field(default=None, description='separate Supabase project wiped by pytest; never the app project')
-    TEST_SUPABASE_SECRET_KEY:      str | None   = Field(default=None, description='secret key of the TEST_SUPABASE_URL project')
-    TEST_SUPABASE_PUBLISHABLE_KEY: str | None   = Field(default=None, description='publishable key of the TEST_SUPABASE_URL project; pytest checks it cannot touch the tables')
-    SUPABASE_S3_STORAGE:           str | None   = Field(default=None, description='Supabase Storage S3 endpoint (https://<ref>.storage.supabase.co/storage/v1/s3)')
-    SUPABASE_REGION:               str | None   = Field(default=None, description='region shown next to the S3 endpoint in Supabase > Storage > S3')
-    SUPABASE_S3_ACCESS_KEY_ID:     str | None   = Field(default=None, description='Supabase Storage S3 access key id; keep server-side')
-    SUPABASE_S3_SECRET_ACCESS_KEY: str | None   = Field(default=None, description='Supabase Storage S3 secret access key; keep server-side')
-    AI_MEMORY_BUCKET:              str | None   = Field(default=None, description='private bucket for per-agent CrewAI memory; unset turns agent memory off')
-    AI_MEMORY_CACHE_DIR:           Path            = Field(default=Path('.ai_memory'), description='local directory agents run their memory out of; synced to AI_MEMORY_BUCKET')
-    WHATSAPP_ACCESS_TOKEN:         str | None   = Field(default=None, description='WhatsApp Cloud API token (Meta system user) that sends messages for every connected number; keep server-side')
-    WHATSAPP_APP_SECRET:           str | None   = Field(default=None, description='Meta app secret: verifies the X-Hub-Signature-256 of every webhook; unset rejects all webhooks')
-    WHATSAPP_VERIFY_TOKEN:         str | None   = Field(default=None, description='any secret string, also entered in the Meta app webhook settings (subscription handshake)')
-    WHATSAPP_GRAPH_VERSION:        str          = Field(default='v23.0', description='Graph API version of the WhatsApp Cloud API')
-    WHATSAPP_GRAPH_URL:            str          = Field(default='https://graph.facebook.com', description='base URL of the Graph API; http://localhost:8001 sends to the local mock (python -m app.api.v1.mock)')
-    WHATSAPP_APPROVAL_TEMPLATE:    str | None   = Field(default=None, description='approved message template (body {{1}} lead, {{2}} draft; 3 quick-reply buttons) sent to an owner outside the 24h window')
-    WHATSAPP_APPROVAL_TEMPLATE_LANGUAGE: str    = Field(default='en', description='language code of WHATSAPP_APPROVAL_TEMPLATE')
-    CORS_ORIGINS:                  CORS_TYPE      = Field(default=['http://localhost:5173'], description='frontend origins allowed by CORS (JSON list or comma-separated)')
+    APP_ENV:                             str             = Field(default='dev',description='')
+    API_VERSION:                         str             = Field(default='v1', description='version segment of the API prefix (/api/{API_VERSION})')
+    VERBOSE:                             bool            = Field(default=True, description='crew ai agent verbose')
+    GOOGLE_SHEETS:                       Optional[str]   = Field(default=None, description='')
+    OPENAI_MODEL:                        str             = Field(...,          description='')
+    AI_REASONING_MODEL:                  Optional[str]   = Field(default=None, description='model for qualification/strategy agents; falls back to OPENAI_MODEL')
+    AI_FAST_MODEL:                       Optional[str]   = Field(default=None, description='model for extraction/classification agents; falls back to OPENAI_MODEL')
+    AI_PRICE_INPUT_PER_MTOK:             Optional[float] = Field(default=None, description="USD per million prompt tokens of the reasoning model; with the output price, each AI run's cost is recorded in dollars")
+    AI_PRICE_CACHED_INPUT_PER_MTOK:      Optional[float] = Field(default=None, description='USD per million cached prompt tokens; unset bills them at the input price')
+    AI_PRICE_OUTPUT_PER_MTOK:            Optional[str]   = Field(default=None, description='USD per million completion tokens of the reasoning model')
+    AI_TEMPERATURE:                      Optional[str]   = Field(default=None, description="sampling temperature for every agent; unset sends none (reasoning models such as gpt-5 reject anything but the default)")
+    OPENAI_API_KEY:                      Optional[str]   = Field(default=None, description='')
+    LOGFIRE_TOKEN:                       Optional[str]   = Field(default=None, description='')
+    SUPABASE_PROJECT_URL:                Optional[str]   = Field(default=None, description='Supabase project URL (https://<ref>.supabase.co); the app database')
+    SUPABASE_PUBLISHABLE_KEY:            Optional[str]   = Field(default=None, description='public key; given to the frontend (Google sign-in), not used by the backend')
+    SUPABASE_SECRET_KEY:                 Optional[str]   = Field(default=None, description='secret (service_role) key the backend uses for every database call; keep server-side')
+    SUPABASE_JWKS_URL:                   Optional[str]   = Field(default=None, description='Supabase Auth public keys, to verify user login tokens; defaults to <SUPABASE_PROJECT_URL>/auth/v1/.well-known/jwks.json')
+    TEST_SUPABASE_URL:                   Optional[str]   = Field(default=None, description='separate Supabase project wiped by pytest; never the app project')
+    TEST_SUPABASE_SECRET_KEY:            Optional[str]   = Field(default=None, description='secret key of the TEST_SUPABASE_URL project')
+    TEST_SUPABASE_PUBLISHABLE_KEY:       Optional[str]   = Field(default=None, description='publishable key of the TEST_SUPABASE_URL project; pytest checks it cannot touch the tables')
+    SUPABASE_S3_STORAGE:                 Optional[str]   = Field(default=None, description='Supabase Storage S3 endpoint (https://<ref>.storage.supabase.co/storage/v1/s3)')
+    SUPABASE_REGION:                     Optional[str]   = Field(default=None, description='region shown next to the S3 endpoint in Supabase > Storage > S3')
+    SUPABASE_S3_ACCESS_KEY_ID:           Optional[str]   = Field(default=None, description='Supabase Storage S3 access key id; keep server-side')
+    SUPABASE_S3_SECRET_ACCESS_KEY:       Optional[str]   = Field(default=None, description='Supabase Storage S3 secret access key; keep server-side')
+    AI_MEMORY_BUCKET:                    Optional[str]   = Field(default=None, description='private bucket for per-agent CrewAI memory; unset turns agent memory off')
+    AI_MEMORY_CACHE_DIR:                 Path            = Field(default=Path('.ai_memory'), description='local directory agents run their memory out of; synced to AI_MEMORY_BUCKET')
+    WHATSAPP_ACCESS_TOKEN:               Optional[str]   = Field(default=None, description='WhatsApp Cloud API token (Meta system user) that sends messages for every connected number; keep server-side')
+    WHATSAPP_APP_SECRET:                 Optional[str]   = Field(default=None, description='Meta app secret: verifies the X-Hub-Signature-256 of every webhook; unset rejects all webhooks')
+    WHATSAPP_VERIFY_TOKEN:               Optional[str]   = Field(default=None, description='any secret string, also entered in the Meta app webhook settings (subscription handshake)')
+    WHATSAPP_GRAPH_VERSION:              str             = Field(default='v23.0', description='Graph API version of the WhatsApp Cloud API')
+    WHATSAPP_GRAPH_URL:                  str             = Field(default='https://graph.facebook.com', description='base URL of the Graph API; http://localhost:8001 sends to the local mock (python -m app.api.v1.mock)')
+    WHATSAPP_APPROVAL_TEMPLATE:          Optional[str]   = Field(default=None, description='approved message template (body {{1}} lead, {{2}} draft; 3 quick-reply buttons) sent to an owner outside the 24h window')
+    WHATSAPP_APPROVAL_TEMPLATE_LANGUAGE: str             = Field(default='en', description='language code of WHATSAPP_APPROVAL_TEMPLATE')
+    CORS_ORIGINS:                        CORS_TYPE       = Field(default=['http://localhost:5173'], description='frontend origins allowed by CORS (JSON list or comma-separated)')
 
     @property
     def api_prefix(self) -> str:
